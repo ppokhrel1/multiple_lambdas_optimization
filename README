@@ -1,4 +1,22 @@
 
-Repository for multiple lambda optimization in different scenarios
+# multiple_lambdas_optimization
+
+This repository contains code for optimizing multiple lambda values across various scenarios, focusing on applications such as data assimilation, expert routing, and large-scale optimization problems. The project provides Python test scripts that evaluate different optimization strategies and solve partial differential equations (PDEs) with multi-source inputs. The goal is to improve computational efficiency and accuracy in environmental, logistics, and related optimization tasks.
+
+## Key Features:
+- **Data Assimilation**: Includes scripts to test and implement data assimilation techniques.
+- **Expert Routing**: Implements optimization solutions for routing problems with expert systems.
+- **Large-Scale Optimization**: Scalable approaches to tackle complex optimization tasks involving multiple sources.
+- **PDE Solvers**: Validates and tests multi-source PDE solvers for optimal solutions.
+
+## Recent Updates:
+- Files have been reorganized for better structure and maintainability.
+- Improved support for handling large-scale multi-source optimization scenarios.
+
+## Installation & Usage:
+1. Clone this repository:
+   ```bash
+   git clone git@github.com:ppokhrel1/multiple_lambdas_optimization.git
+
 
 
