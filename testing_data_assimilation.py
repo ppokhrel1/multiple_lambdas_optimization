@@ -106,69 +106,68 @@ class MultiStepPredictionModule(nn.Module):
         
         # Enhanced prediction network architecture
         self.prediction_net = nn.Sequential(
-            # First layer processes state and derivatives
-            nn.Linear(input_dim * 3, hidden_dim * 2),  # [state, du_dx, d2u_dx2]
+            nn.Linear(input_dim, hidden_dim * 2),  # Update input size to match concatenation
             nn.LayerNorm(hidden_dim * 2),
             nn.ReLU(),
+            nn.Dropout(0.2),  # Add dropout
             
-            # Deep residual processing
-            ResidualBlock(hidden_dim * 2, hidden_dim * 2),
-            ResidualBlock(hidden_dim * 2, hidden_dim * 2),
-            nn.LayerNorm(hidden_dim * 2),
+            #ResidualBlock(hidden_dim * 2, hidden_dim * 2),
+            #nn.LayerNorm(hidden_dim * 2),
+            #nn.Dropout(0.2),  # Add dropout
             
-            # Prediction head - output same size as input
-            nn.Linear(hidden_dim * 2, input_dim)
+            nn.Linear(hidden_dim * 2, input_dim)  # Output size matches the input dimension
         )
-
-        
-        # Additional physics-aware processing
-        self.physics_net = nn.Sequential(
-            nn.Linear(input_dim * 4, hidden_dim),  # [state, prediction, du_dx, d2u_dx2]
-            nn.LayerNorm(hidden_dim),
-            nn.ReLU(),
-            ResidualBlock(hidden_dim, hidden_dim),
-            nn.Linear(hidden_dim, input_dim)
-        )
+                
+        # # Additional physics-aware processing
+        # self.physics_net = nn.Sequential(
+        #     nn.Linear(input_dim * 4, hidden_dim),  # [state, prediction, du_dx, d2u_dx2]
+        #     nn.LayerNorm(hidden_dim),
+        #     nn.ReLU(),
+        #     ResidualBlock(hidden_dim, hidden_dim),
+        #     nn.Linear(hidden_dim, input_dim)
+        # )
     
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         batch_size = x.shape[0]
         predictions = [x]
         current_state = x
         
-        for step in range(self.n_steps):
+        return self.prediction_net(x), None
+
+        '''
+        for step in range(self.n_steps-1):
             # Compute spatial derivatives
-            du_dx, d2u_dx2 = self.compute_derivatives(current_state)
+            #du_dx, d2u_dx2 = self.compute_derivatives(current_state)
             
             # Neural network prediction
-            network_input = torch.cat([current_state, du_dx, d2u_dx2], dim=-1)
+            network_input = current_state.unsqueeze(0) #torch.cat([current_state, current_state], dim=-1)
             prediction = self.prediction_net(network_input)
+
             
-            # Physics-based update
-            physics_update = self.dt * (
-                -current_state * du_dx +    # Advection
-                self.nu * d2u_dx2          # Diffusion
-            )
+            next_state = prediction[-1]
+
+            # # Combine neural and physics predictions
+            # combined_input = torch.cat([current_state, prediction, du_dx, d2u_dx2], dim=-1)
+            # physics_correction = self.physics_net(combined_input)
             
-            # Combine neural and physics predictions
-            combined_input = torch.cat([current_state, prediction, du_dx, d2u_dx2], dim=-1)
-            physics_correction = self.physics_net(combined_input)
+            # # Final update with residual connection
+            # next_state = current_state + self.dt * (prediction + physics_correction + physics_update)
             
-            # Final update with residual connection
-            next_state = current_state + self.dt * (prediction + physics_correction + physics_update)
+            # # Apply boundary conditions
+            # next_state = F.pad(next_state[..., 1:-1], (1,1), mode='circular')
             
-            # Apply boundary conditions
-            next_state = F.pad(next_state[..., 1:-1], (1,1), mode='circular')
-            
-            # Add noise to prevent collapse to straight line
-            #if self.training:
-            #    noise = torch.randn_like(next_state) * 0.001 * self.dt
+            # # Add noise to prevent collapse to straight line
+            # if self.training:
+            #    noise = torch.randn_like(next_state) * 1e-6 * self.dt
             #    next_state = next_state + noise
                 
             predictions.append(next_state)
             current_state = next_state
         
-        predictions = torch.stack(predictions, dim=1)
+        predictions = torch.stack(predictions, dim=0)
+
         return predictions, None
+        '''
     
     def compute_derivatives(self, u: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute spatial derivatives with improved numerical stability"""
@@ -703,7 +702,7 @@ class EnhancedMultiSourceBase(BasePDEModel):
             0.1 * energy_conservation
         )
         
-        return 0 * total_loss
+        return  total_loss
 
 
 
@@ -791,49 +790,32 @@ class SoftmaxMultiSourceIntegration(EnhancedMultiSourceBase):
         
     def forward(self, x: torch.Tensor,  t: int = 0) -> Tuple[torch.Tensor, Dict]:
         # Generate prediction from analysis state
-        predictions, _ = self.prediction_module(x)  # [batch, pred_steps, spatial_points]
+        #predictions, _ = self.prediction_module(x)  # [batch, pred_steps, spatial_points]
+        #print(predictions.shape, x.shape)
+        predictions, _ = self.prediction_module(x)
         
         return predictions, {
             'weights': self.lambda_weights,
         }
 
-    def get_analysis_state(self, x, measurements):
+    def get_analysis_state(self, measurements):
         # Get reliability scores and weights
         weights = F.softmax(self.lambda_weights, dim=0)
         
         # Directly combine measurements using weights
         analysis_states = []  # List to store each timestep's analysis state
         
-        for t in range(measurements.shape[2]):
-            # Initialize for this timestep
-            analysis_state = torch.zeros_like(x)  # [batch, spatial_points]
-            weight_sum = torch.zeros_like(x)      # [batch, spatial_points]
-            
-            # Combine measurements using weights
-            for i in range(self.n_sources):
-                # Get scalar weight
-                weight = weights[i].item()
-                
-                # Handle measurements for this source
-                valid_mask = ~torch.isnan(measurements[:, i, t])  # [batch, spatial_points]
-                current_measurements = measurements[:, i, t].clone()  # [batch, spatial_points]
-                
-                # Set invalid measurements to zero
-                current_measurements[~valid_mask] = 0.0
-                
-                # Add weighted measurements
-                analysis_state += weight * current_measurements
-                weight_sum[valid_mask] += weight
-            
-            # Normalize by weight sum where valid
-            valid_mask = weight_sum > 0
-            analysis_state[valid_mask] = analysis_state[valid_mask] / weight_sum[valid_mask]
-            
-            # Append this timestep's analysis state
-            analysis_states.append(analysis_state)
-        
+        weights_reshaped = weights.view(1, -1, 1, 1).expand(measurements.shape[0], measurements.shape[1], measurements.shape[2], measurements.shape[3])
+
+        # Multiply measurements by the reshaped weights
+        weighted_measurements = measurements * weights_reshaped  # Shape: [batch_size, 3, 51, 32]
+
+        # Sum across the source dimension (the second dimension, which has size 3)
+        analysis_states = weighted_measurements.sum(dim=1)  # Shape: [batch_size, 51, 32]
+
+
         # Stack along time dimension to match x shape
-        analysis_states = torch.stack(analysis_states, dim=1)  # [batch, timesteps, spatial_points]
+        # analysis_states = torch.stack(analysis_states, dim=1)  # [batch, timesteps, spatial_points]
         
         return analysis_states, {
             'analysis_state': analysis_states,
@@ -848,58 +830,43 @@ class SoftmaxMultiSourceIntegration(EnhancedMultiSourceBase):
         true_solution: Optional[torch.Tensor] = None,
         is_training: bool = True
     ) -> Tuple[torch.Tensor, Dict]:
-        analysis_state, _ = self.get_analysis_state(x, measurements)
-
-        with torch.no_grad():
-            noise = torch.randn_like(self.lambda_weights) * 1e-5
-            self.lambda_weights.add_(noise)
-            
-        #predictions, metadata = self.forward(analysis_state)
-
-        weights = F.softmax(self.lambda_weights, dim=0) # self.lambda_weights
+        analysis_state, _ = self.get_analysis_state(measurements)
         
-        # Compute prediction loss (against measurements)
-        loss = 0.0
-        valid_samples = 0
-        physics_loss = 0
-        predictions_list = []
-        for t in range(measurements.shape[2] - 1):  # Loop over timesteps except last
-            # Get current and next analysis states
-            current_analysis = analysis_state[:, t]      # [batch, spatial]
-            next_analysis = analysis_state[:, t + 1]     # [batch, spatial]
-            predictions, metadata = self.prediction_module(current_analysis)  # [batch, pred_steps, spatial]
-
-            # Get prediction for current timestep
-            current_pred = predictions[:, 0]  # Take first prediction step [batch, spatial]
-            predictions_list.append(current_pred)
-            # Compute loss between prediction and next analysis state
-            timestep_loss = F.mse_loss(current_pred, next_analysis)
+        # Ensure the batch sizes match
+        batch_size = analysis_state.shape[0]
+        
+        # Initialize predictions list with the initial state
+        predictions_list = [analysis_state[:, 0]]
+        
+        # Loop over timesteps to make predictions
+        for t in range(analysis_state.shape[1] - 1):
+            # Get the current state (last prediction)
+            current_state = predictions_list[-1]
             
-            loss += timestep_loss
-            valid_samples += 1
-
-        if valid_samples > 0:
-            loss = loss / valid_samples
-
-        predictions_list = torch.stack(predictions_list, dim=1) 
-        if is_training:
-            physics_loss += self.compute_physics_loss(predictions_list)
-            weight_reg = 0.01 * torch.norm(weights, p=2)
+            # Make prediction for the next timestep
+            next_prediction, _ = self.prediction_module(current_state)
+            #print(next_prediction.shape)
             
-            total_loss = (
-                loss + 
-                0.1 * physics_loss + 
-                weight_reg
-            )
-        else:
-            total_loss = true_loss
-            physics_loss = torch.tensor(0.0, device=x.device)
-
+            # Append the prediction to the list
+            predictions_list.append(next_prediction)  # Take the last prediction step
+        
+        # Stack predictions along the timestep dimension
+        predictions = torch.stack(predictions_list, dim=1)
+        
+        # Compute loss between predictions and analysis state
+        loss = F.l1_loss(predictions, analysis_state)
+        
+        # Compute physics loss if training
+        physics_loss = self.compute_physics_loss(predictions) if is_training else torch.tensor(0.0)
+        
+        # Combine losses
+        total_loss = loss + 1e-4 * physics_loss
+        
         return total_loss, {
             'loss': total_loss.item(),
             'pred_loss': loss.item(),
             'physics_loss': physics_loss.item() if is_training else 0.0,
-            'weights': weights,
+            'weights': F.softmax(self.lambda_weights, dim=0),
             'reconstruction_loss': loss.item(),
         }
 
@@ -944,49 +911,31 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
         weights = weights / (sum_weights + 1e-8)  # Normalize to sum to 1
         
         # Apply non-negativity constraint
-        weights = F.softmax(weights)  # Ensure non-negative
+        #weights = F.relu(weights)  # Ensure non-negative
 
         
         return weights
     
-    def get_analysis_state(self, x, measurements):
+    def get_analysis_state(self, measurements):
         # Get reliability scores and weights
 
         weights = self.compute_lagrangian_weights()
         
         # Directly combine measurements using weights
         analysis_states = []  # List to store each timestep's analysis state
-        
-        for t in range(measurements.shape[2]):
-            # Initialize for this timestep
-            analysis_state = torch.zeros_like(x)  # [batch, spatial_points]
-            weight_sum = torch.zeros_like(x)      # [batch, spatial_points]
-            
-            # Combine measurements using weights
-            for i in range(self.n_sources):
-                # Get scalar weight
-                weight = weights[i].item()
-                
-                # Handle measurements for this source
-                valid_mask = ~torch.isnan(measurements[:, i, t])  # [batch, spatial_points]
-                current_measurements = measurements[:, i, t].clone()  # [batch, spatial_points]
-                
-                # Set invalid measurements to zero
-                current_measurements[~valid_mask] = 0.0
-                
-                # Add weighted measurements
-                analysis_state += weight * current_measurements
-                weight_sum[valid_mask] += weight
-            
-            # Normalize by weight sum where valid
-            valid_mask = weight_sum > 0
-            analysis_state[valid_mask] = analysis_state[valid_mask] / weight_sum[valid_mask]
-            
-            # Append this timestep's analysis state
-            analysis_states.append(analysis_state)
-        
+
+        #print(measurements.shape)
+        weights_reshaped = weights.view(1, -1, 1, 1).expand(measurements.shape[0], measurements.shape[1], measurements.shape[2], measurements.shape[3])
+
+        # Multiply measurements by the reshaped weights
+        weighted_measurements = measurements * weights_reshaped  # Shape: [batch_size, 3, 51, 32]
+
+        # Sum across the source dimension (the second dimension, which has size 3)
+        analysis_states = weighted_measurements.sum(dim=1)  # Shape: [batch_size, 51, 32]
+
+
         # Stack along time dimension to match x shape
-        analysis_states = torch.stack(analysis_states, dim=1)  # [batch, timesteps, spatial_points]
+        # analysis_states = torch.stack(analysis_states, dim=1)  # [batch, timesteps, spatial_points]
         
         return analysis_states, {
             'analysis_state': analysis_states,
@@ -1051,39 +1000,43 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
         true_solution: Optional[torch.Tensor] = None,
         is_training: bool = True
     ) -> Tuple[torch.Tensor, Dict]:
-        analysis_state, _ = self.get_analysis_state(x, measurements)
+        analysis_state, _ = self.get_analysis_state(measurements)
 
         predictions, metadata = self.forward(analysis_state)
         
         weights = self.compute_lagrangian_weights()
-
-        with torch.no_grad():
-            noise = torch.randn_like(self.lambda_weights) * 1e-5
-            self.lambda_weights.add_(noise)
         
-        loss = 0.0
-        valid_samples = 0
-        physics_loss = 0
-        predictions_list = []
-        for t in range(measurements.shape[2] - 1):  # Loop over timesteps except last
-            # Get current and next analysis states
-            current_analysis = analysis_state[:, t]      # [batch, spatial]
-            next_analysis = analysis_state[:, t + 1]     # [batch, spatial]
-            predictions, metadata = self.prediction_module(current_analysis)  # [batch, pred_steps, spatial]
+        analysis_state, _ = self.get_analysis_state(measurements)
+        
+        # Ensure the batch sizes match
+        batch_size = analysis_state.shape[0]
+        
+        # Initialize predictions list with the initial state
+        predictions_list = [analysis_state[:, 0]]
+        
+        # Loop over timesteps to make predictions
+        for t in range(analysis_state.shape[1] - 1):
+            # Get the current state (last prediction)
+            current_state = predictions_list[-1]
             
-            # Get prediction for current timestep
-            current_pred = predictions[:, 0]  # Take first prediction step [batch, spatial]
-            predictions_list.append(current_pred)
+            # Make prediction for the next timestep
+            next_prediction, _ = self.prediction_module(current_state)
             
-            # Compute loss between prediction and next analysis state
-            timestep_loss = F.mse_loss(current_pred, next_analysis)
-            loss += timestep_loss
-            valid_samples += 1
-
+            # Append the prediction to the list
+            predictions_list.append(next_prediction)  # Take the last prediction step
+        
+        # Stack predictions along the timestep dimension
+        predictions = torch.stack(predictions_list, dim=1)
+        
+        # Compute loss between predictions and analysis state
+        loss = F.l1_loss(predictions, analysis_state)
+        
+        valid_samples = analysis_state.shape[1]
         if valid_samples > 0:
             loss = loss / valid_samples
         
-        predictions_list = torch.stack(predictions_list, dim=1) 
+        physics_loss = 0
+        predictions_list = predictions
         if is_training:
             physics_loss += self.compute_physics_loss(predictions_list)
             
@@ -1103,9 +1056,9 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
             # Total loss
             total_loss = (
                 loss +
-                0.1 * physics_loss #+
-                #constraint_loss +
-                #multiplier_loss
+                1e-4 * physics_loss +
+                constraint_loss +
+                multiplier_loss
             )
         else:
             total_loss = loss
@@ -1163,7 +1116,7 @@ class ComparativeTrainer:
         self.softmax_optimizer = torch.optim.AdamW(
             softmax_model.parameters(),
             lr=lr_softmax,
-            weight_decay=1e-4
+            weight_decay=1e-6
         )
         
         # Separate optimizers for Lagrangian model components
@@ -1171,13 +1124,13 @@ class ComparativeTrainer:
             [p for n, p in lagrangian_model.named_parameters()
              if not any(x in n for x in ['lambda_weights', 'mu', 'nu'])],
             lr=lr_theta,
-            weight_decay=1e-4
+            weight_decay=1e-6
         )
         
         self.lambda_optimizer = torch.optim.AdamW(
             [lagrangian_model.lambda_weights],
             lr=lr_lambda,
-            weight_decay=0.0
+            weight_decay=1e-6
         )
         
         self.multiplier_optimizer = torch.optim.Adam(
@@ -1228,7 +1181,8 @@ class ComparativeTrainer:
             k: {m: float(np.mean(metrics)) for m, metrics in metrics_list.items()}
             for k, metrics_list in epoch_metrics.items()
         }
-    
+
+
     def train_step(
         self,
         batch: Dict[str, torch.Tensor]
@@ -1245,11 +1199,9 @@ class ComparativeTrainer:
             x, measurements, true_solution, is_training=True
         )
         loss_soft.backward()
-        torch.nn.utils.clip_grad_norm_(self.lagrangian_model.parameters(), max_norm=1.0)
-        
+        torch.nn.utils.clip_grad_norm_(self.softmax_model.parameters(), max_norm=1.0)
         self.softmax_optimizer.step()
 
-        
         # Train Lagrangian model
         self.theta_optimizer.zero_grad()
         self.lambda_optimizer.zero_grad()
@@ -1259,45 +1211,70 @@ class ComparativeTrainer:
             x, measurements, true_solution, is_training=True
         )
         loss_lag.backward()
-        torch.nn.utils.clip_grad_norm_(self.softmax_model.parameters(), max_norm=1.0)
-        
-        # Update parameters
+        torch.nn.utils.clip_grad_norm_(self.lagrangian_model.parameters(), max_norm=1.0)
         self.theta_optimizer.step()
         self.lambda_optimizer.step()
         self.multiplier_optimizer.step()
+
+        # Calculate true losses
+        true_loss_soft = 0.0
+        true_loss_lag = 0.0
         
-        # Calculate true loss (MSE with true solution)
         with torch.no_grad():
-            output_soft, _ = self.softmax_model(x, measurements)
-            output_lag, _ = self.lagrangian_model(x, measurements)
-            true_loss_soft = F.mse_loss(output_soft[:, -1, :], true_solution[:, 0])
+            # Get initial states
+            analysis_state_soft, _ = self.softmax_model.get_analysis_state(measurements)
+            analysis_state_lag, _ = self.lagrangian_model.get_analysis_state(measurements)
 
-            # Or if you want to compare a specific time step (e.g., time step 0)
-            true_loss_soft = F.mse_loss(output_soft[:, 1, :], true_solution[:, 1])
+            # Autoregressive predictions for both models
+            soft_preds = [analysis_state_soft[:, 0]]
+            lag_preds = [analysis_state_lag[:, 0]]
+            
+            current_soft = analysis_state_soft[:, 0]
+            current_lag = analysis_state_lag[:, 0]
+            
+            for t in range(true_solution.shape[1] - 1):
+                # Softmax prediction
+                pred_soft, _ = self.softmax_model(current_soft)
+                soft_preds.append(pred_soft)
+                current_soft = pred_soft
+                
+                # Lagrangian prediction
+                pred_lag, _ = self.lagrangian_model(current_lag)
+                lag_preds.append(pred_lag)
+                current_lag = pred_lag
 
-            # Similarly for output_lag
-            true_loss_lag = F.mse_loss(output_lag[:, 1, :], true_solution[:, 1])
-            #true_loss_lag = F.mse_loss(output_lag[:, -1, :], true_solution[:, -1])
-                    
+            # Stack predictions [batch, timesteps, features]
+            soft_preds = torch.stack(soft_preds, dim=1)
+            lag_preds = torch.stack(lag_preds, dim=1)
+            
+            # Ensure matching dimensions
+            if true_solution is not None:
+                true_loss_soft = F.mse_loss(
+                    soft_preds[:, :true_solution.shape[1]], 
+                    true_solution[:, :soft_preds.shape[1]]
+                )
+                true_loss_lag = F.mse_loss(
+                    lag_preds[:, :true_solution.shape[1]], 
+                    true_solution[:, :lag_preds.shape[1]]
+                )
+
         return {
             'softmax': {
                 'loss': loss_soft.item(),
-                'physics_loss': meta_soft['physics_loss'],
-                'pred_loss': meta_soft['pred_loss'],
+                'physics_loss': meta_soft.get('physics_loss', 0.0),
+                'pred_loss': meta_soft.get('pred_loss', 0.0),
                 'weights_mean': meta_soft['weights'].mean().item(),
                 'weights_std': meta_soft['weights'].std().item(),
-                'true_error': meta_soft.get('true_error', None),
-                'true_loss': true_loss_soft.item()  # Add this
+                'true_loss': true_loss_soft.item() if true_solution is not None else 0.0
             },
             'lagrangian': {
                 'loss': loss_lag.item(),
-                'physics_loss': meta_lag['physics_loss'],
-                'pred_loss': meta_lag['pred_loss'],
-                'constraint_loss': meta_lag['constraint_loss'],
+                'physics_loss': meta_lag.get('physics_loss', 0.0),
+                'pred_loss': meta_lag.get('pred_loss', 0.0),
+                'constraint_loss': meta_lag.get('constraint_loss', 0.0),
                 'weights_mean': meta_lag['weights'].mean().item(),
                 'weights_std': meta_lag['weights'].std().item(),
-                'true_error': meta_lag.get('true_error', None),
-                'true_loss': true_loss_lag.item()  # Add this
+                'true_loss': true_loss_lag.item() if true_solution is not None else 0.0
             }
         }
 
@@ -1318,27 +1295,36 @@ class ComparativeTrainer:
             for batch in dataloader:
                 x = batch['x'].to(self.device)
                 measurements = batch['measurements'].to(self.device)
-                true_solution = batch.get('true_solution', None)
-                if true_solution is not None:
-                    true_solution = true_solution.to(self.device)
+                true_solution = batch['true_solution'].to(self.device)
                 
-                # Get predictions for both models
-                output_soft, meta_soft = self.softmax_model(x, measurements)
-                output_lag, meta_lag = self.lagrangian_model(x, measurements)
+                # Get predictions for all timesteps
+                soft_preds, lag_preds = [], []
                 
-
-               # true_loss_soft = F.mse_loss(output_soft[:, -1, :], true_solution[:, 0])
-
-                # Or if you want to compare a specific time step (e.g., time step 0)
-                true_loss_soft = F.mse_loss(output_soft[:, 1, :], true_solution[:, 1])
+                # Softmax model predictions
+                current_state = x
+                for t in range(true_solution.shape[1]):
+                    pred, _ = self.softmax_model(current_state)
+                    soft_preds.append(pred)
+                    current_state = pred  # Autoregressive update
                 
-                # Similarly for output_lag
-                #true_loss_lag = F.mse_loss(output_lag[:, -1, :], true_solution[:, -1])
-                true_loss_lag = F.mse_loss(output_lag[:, 1, :], true_solution[:, 1])
+                # Lagrangian model predictions
+                current_state = x
+                for t in range(true_solution.shape[1]):
+                    pred, _ = self.lagrangian_model(current_state)
+                    lag_preds.append(pred)
+                    current_state = pred  # Autoregressive update
                 
-                # Store metrics
-                val_metrics['softmax']['loss'].append(true_loss_soft.item())
-                val_metrics['lagrangian']['loss'].append(true_loss_lag.item())
+                # Stack predictions [batch, timesteps, features]
+                soft_preds = torch.stack(soft_preds, dim=1)
+                lag_preds = torch.stack(lag_preds, dim=1)
+                
+                # Calculate losses per timestep
+                soft_loss = F.mse_loss(soft_preds, true_solution)
+                lag_loss = F.mse_loss(lag_preds, true_solution)
+                
+                val_metrics['softmax']['loss'].append(soft_loss.item())
+                val_metrics['lagrangian']['loss'].append(lag_loss.item())
+        
                 
               
             
@@ -1436,31 +1422,36 @@ def plot_comparative_results(
     with torch.no_grad():
         predictions_soft = []
         predictions_lag = []
-        current_soft = x#[:, 0] 
-        current_lag = x#[:, 0] 
+        current_soft = x.clone()  # Keep full spatial dimension [1, 64]
+        current_lag = x.clone()   # [batch_size=1, input_dim=64]
         
-        for t in range(true_solution.shape[0]):
+        for t in range(true_solution.shape[0]):  # For each timestep
+            # Get full predictions
+            pred_soft, _ = trainer.softmax_model(current_soft, measurements)
+            pred_lag, _ = trainer.lagrangian_model(current_lag, measurements)
             
-            output_soft, _ = trainer.softmax_model(current_soft, measurements)
-            output_lag, _ = trainer.lagrangian_model(current_lag, measurements)
+            # Store full predictions
+            predictions_soft.append(pred_soft)
+            predictions_lag.append(pred_lag)
             
-            predictions_soft.append(output_soft)
-            predictions_lag.append(output_lag)
-            
-            current_soft = output_soft[:, 0, :]
-            current_lag = output_lag[:, 0, :]
-        
+            # Update current state with full prediction
+            current_soft = pred_soft.detach()
+            current_lag = pred_lag.detach()
+
+        # Stack predictions [batch=1, timesteps, spatial=64]
         predictions_soft = torch.stack(predictions_soft, dim=1)
         predictions_lag = torch.stack(predictions_lag, dim=1)
+
     
     # Choose spatial point for visualization
     spatial_point = x.shape[-1] // 2
     time_steps = np.arange(true_solution.shape[0])
-    
+    print(predictions_lag.shape, predictions_soft.shape, true_solution.shape)
     #print(true_solution.shape, predictions_soft.shape, predictions_lag.shape)
-    print(predictions_soft[0, :, -1, spatial_point].cpu().numpy())
+    print(predictions_soft[0, spatial_point].cpu().numpy())
+    print(predictions_lag[0, spatial_point].cpu().numpy())
     # Plot true solution
-
+    print(predictions_lag.shape, predictions_soft.shape)
     true_line = ax4.plot(time_steps, 
                         true_solution[:, spatial_point].cpu().numpy(),
                         color=line_colors['true'], linestyle='-',
@@ -1468,12 +1459,12 @@ def plot_comparative_results(
     
     # Plot model predictions over time
     soft_line = ax4.plot(time_steps, 
-                        predictions_soft[0, :, -1, spatial_point].cpu().numpy(), 
+                        predictions_soft[0, :, spatial_point].cpu().numpy(), 
                         color=line_colors['softmax'], linestyle='--',
                         alpha=0.7, linewidth=2, label='Softmax')[0]
     
     lag_line = ax4.plot(time_steps, 
-                       predictions_lag[0, :, -1, spatial_point].cpu().numpy(), 
+                       predictions_lag[0, :, spatial_point].cpu().numpy(), 
                        color=line_colors['lagrangian'], linestyle=':',
                        alpha=0.7, linewidth=2, label='Lagrangian')[0]
     
@@ -1495,9 +1486,9 @@ def plot_comparative_results(
     
     # Set y-axis limits
     y_values = np.concatenate([
-        true_solution[:, spatial_point].cpu().numpy(),
-        predictions_soft[0, :, -1, spatial_point].cpu().numpy(),
-        predictions_lag[0, :, -1, spatial_point].cpu().numpy(),
+        true_solution[spatial_point].cpu().numpy(),
+        predictions_soft[0, :, spatial_point].cpu().numpy(),
+        predictions_lag[0, :, spatial_point].cpu().numpy(),
         #measurements[0, :, :, spatial_point].cpu().numpy()[~torch.isnan(measurements[0, :, :, spatial_point])]
     ])
     y_values = y_values[~np.isnan(y_values) & ~np.isinf(y_values)]
@@ -1603,21 +1594,23 @@ def plot_prediction_comparison(
     with torch.no_grad():
         predictions_soft = []
         predictions_lag = []
-        current_soft = x  # Take first timestep [batch, spatial]
-        current_lag = x   # Take first timestep [batch, spatial]
+        current_soft = x.clone()  # [1, 64]
+        current_lag = x.clone()
         
         for t in range(true_solution.shape[0]):
-            output_soft, _ = trainer.softmax_model(current_soft, measurements)
-            output_lag, _ = trainer.lagrangian_model(current_lag, measurements)
+            pred_soft, _ = trainer.softmax_model(current_soft, measurements)
+            pred_lag, _ = trainer.lagrangian_model(current_lag, measurements)
             
-            predictions_soft.append(output_soft)
-            predictions_lag.append(output_lag)
+            predictions_soft.append(pred_soft)
+            predictions_lag.append(pred_lag)
             
-            current_soft = output_soft[:, 0, :]
-            current_lag = output_lag[:, 0, :]
+            current_soft = pred_soft
+            current_lag = pred_lag
         
+        # Stack predictions [1, timesteps, 64]
         predictions_soft = torch.stack(predictions_soft, dim=1)
         predictions_lag = torch.stack(predictions_lag, dim=1)
+
     # Get dimensions
     n_timesteps = true_solution.shape[0]
     time_steps = np.arange(n_timesteps)
@@ -1645,13 +1638,13 @@ def plot_prediction_comparison(
                           measurements[0, j, valid_mask, spatial_point].cpu().numpy(),
                           color=source_colors[j], alpha=0.3, s=30,
                           label=f'Source {j+1}')
-        
+
         # Plot model outputs
         ax.plot(time_steps, 
-                predictions_soft[0, :, -1, spatial_point].cpu().numpy(),
+                predictions_soft[0, :, spatial_point].cpu().numpy(),
                 '--', color='blue', label='Softmax', alpha=0.8, linewidth=2)
         ax.plot(time_steps, 
-                predictions_lag[0, :, -1, spatial_point].cpu().numpy(),
+                predictions_lag[0, :, spatial_point].cpu().numpy(),
                 '--', color='red', label='Lagrangian', alpha=0.8, linewidth=2)
         
         # Format weights for display
@@ -1672,9 +1665,9 @@ def plot_prediction_comparison(
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
                  fontsize=9, frameon=True, fancybox=True, shadow=True)
         # Set y-limits
-        y_data = [true_solution[:, spatial_point].detach().cpu().numpy(),
-                 predictions_soft[0, :, -1, spatial_point].detach().cpu().numpy(),
-                 predictions_lag[0, :, -1, spatial_point].detach().cpu().numpy()]
+        y_data = [true_solution[spatial_point].detach().cpu().numpy(),
+                 predictions_soft[0, :, spatial_point].detach().cpu().numpy(),
+                 predictions_lag[0, :, spatial_point].detach().cpu().numpy()]
         
         # Add measurement data
         for j in range(dataset.n_sources):
@@ -1685,7 +1678,7 @@ def plot_prediction_comparison(
         y_data = np.concatenate([d for d in y_data if len(d) > 0])
         y_range = np.ptp(y_data)
         y_mean = np.mean(y_data)
-        ax.set_ylim([y_mean - 1.2*y_range/2, y_mean + 1.2*y_range/2])
+        ax.set_ylim([y_mean - 1.5*y_range/2, y_mean + 1.5*y_range/2])
         
         # Add minor grid
         ax.grid(True, which='minor', alpha=0.15)
@@ -1711,11 +1704,12 @@ def plot_prediction_comparison(
 def main():
     """Main training script"""
     # Parameters
-    n_samples = 500
-    input_dim = 32
+    n_samples = 2048 # multiple of batch size
+    input_dim = 64
     n_sources = 3
-    batch_size = 32
-    n_epochs = 200
+    batch_size = 64
+    timesteps = 100
+    n_epochs = 500
     save_dir = 'results'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -1726,14 +1720,16 @@ def main():
         n_samples=n_samples,
         input_dim=input_dim,
         n_sources=n_sources,
+        n_timesteps = timesteps,
         noise_levels=[0.02, 0.02, 0.03, 0.04, 0.1],  # Reduced noise levels
         bias_levels=[0.0, 0.01, -0.02, 0.03, 0.05]    # Reduced bias levels
     )
     
     val_dataset = MultiSourceNavierStokes1DDataset(
-        n_samples=n_samples//5,
+        n_samples=n_samples//8,
         input_dim=input_dim,
         n_sources=n_sources,
+        n_timesteps=timesteps,
         noise_levels=[0.02, 0.02, 0.03, 0.04, 0.1],  # Reduced noise levels
         bias_levels=[0.0, 0.01, -0.02, 0.03, 0.05]    # Reduced bias levels
     )
@@ -1747,13 +1743,14 @@ def main():
     softmax_model = SoftmaxMultiSourceIntegration(
         n_sources=n_sources,
         input_dim=input_dim,
-        hidden_dim=128
-    )
+        hidden_dim=128,
+        n_prediction_steps=batch_size   )
     
     lagrangian_model = TwoTimeScaleLagrangianOptimizer(
         n_sources=n_sources,
         input_dim=input_dim,
-        hidden_dim=128
+        hidden_dim=128,
+        n_prediction_steps=batch_size,
     )
     
     # Create trainer
@@ -1761,8 +1758,8 @@ def main():
         softmax_model=softmax_model,
         lagrangian_model=lagrangian_model,
         lr_softmax=1e-4,
-        lr_theta=1e-6,
-        lr_lambda=1e-4,
+        lr_theta=1e-3,
+        lr_lambda=1e-5,
         device=device
     )
     
