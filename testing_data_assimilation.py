@@ -108,6 +108,10 @@ class MultiStepPredictionModule(nn.Module):
         self.prediction_net = nn.Sequential(
             nn.Linear(input_dim, hidden_dim * 2),  # Update input size to match concatenation
             nn.LayerNorm(hidden_dim * 2),
+            
+            nn.Linear(hidden_dim*2, hidden_dim*2),
+            nn.Linear(hidden_dim*2, hidden_dim*2),
+            nn.Linear(hidden_dim*2, hidden_dim*2),
             nn.ReLU(),
             nn.Dropout(0.2),  # Add dropout
             
@@ -664,25 +668,62 @@ class EnhancedMultiSourceBase(BasePDEModel):
         predictions: [batch, timesteps, spatial_points] - Model predictions
         """
         total_residual = 0.0
+        L=2
+        #nu = 1.0 / self.Re
         
-        # For each timestep except the last one
+        # Finite difference coefficients
         for t in range(predictions.shape[1] - 1):
-            current_state = predictions[:, t]  # Current predicted state
-            next_state_pred = predictions[:, t + 1]  # Next predicted state
+            u = predictions[:, t]  # Current state
+            U_scale = torch.max(torch.abs(u))
+            nu = (U_scale * 2.0) / self.Re  # L=2.0 domain
+
+            u_next = predictions[:, t + 1]  # Next state
             
-            # Compute spatial derivatives for current state
-            du_dx, d2u_dx2 = self.compute_derivatives(current_state)
+            # Central differences for spatial derivatives
+            u_prev = torch.roll(u, shifts=1, dims=-1)  # u[i-1]
+            u_next_space = torch.roll(u, shifts=-1, dims=-1)  # u[i+1]
             
-            # Physics consistency check (Burgers equation)
-            du_dt = (next_state_pred - current_state) / self.dt
-            physics_residual = (
-                du_dt + 
-                current_state * du_dx - 
-                self.viscosity * d2u_dx2
-            ).pow(2).mean()
+            # First derivative (central difference)
+            du_dx = (u_next_space - u_prev) / (2 * self.dx)
             
-            total_residual += physics_residual
-        
+            # Second derivative (central difference)
+            d2u_dx2 = (u_next_space - 2*u + u_prev) / (self.dx**2)
+            
+            # Time derivative (forward difference)
+            du_dt = (u_next - u) / self.dt
+            
+            # Burgers equation residual with adaptive viscosity
+            residual = du_dt + u * du_dx - nu * d2u_dx2
+            
+            # Shock detection - increase viscosity near discontinuities
+            shock_factor = torch.clamp(torch.abs(du_dx)/5.0, 0, 1)
+            effective_viscosity = nu * (1 + shock_factor)
+            
+            # Final residual with adaptive viscosity
+                        
+            # --- Time Derivative ---
+            du_dt = (u_next - u) / self.dt
+            
+            # --- Shock Detection & Adaptive Viscosity ---
+            with torch.no_grad():
+                shock_mask = (torch.abs(du_dx) > 0.5*U_scale/L)  # Threshold based on characteristic scale
+                shock_factor = torch.clamp(torch.abs(du_dx)/(U_scale/L + 1e-6), 0, 3)
+            
+            effective_viscosity = nu * (1 + shock_factor)
+            
+            # --- Burgers' Residual ---
+            residual = du_dt + u*du_dx - effective_viscosity*d2u_dx2
+            
+            # --- CFL-Adaptive Weighting ---
+            cfl = (torch.abs(u) * self.dt / self.dx).max(dim=-1, keepdim=True).values
+            weight = torch.exp(-5.0 * cfl)  # Downweight high-CFL regions
+            
+            total_residual += (weight * residual.pow(2)).mean()
+
+            
+            #total_residual += residual.pow(2).mean()
+
+
         # Average over timesteps
         physics_loss = total_residual / (predictions.shape[1] - 1 + 1e-5)
         
@@ -691,16 +732,16 @@ class EnhancedMultiSourceBase(BasePDEModel):
         mass_final = torch.trapz(predictions[:, -1], dx=self.dx, dim=-1)
         mass_conservation = (mass_final - mass_initial).pow(2).mean()
         
-        energy_initial = torch.trapz(predictions[:, 0]**2, dx=self.dx, dim=-1)
-        energy_final = torch.trapz(predictions[:, -1]**2, dx=self.dx, dim=-1)
-        energy_conservation = (energy_final - energy_initial).pow(2).mean()
+        #energy_initial = torch.trapz(predictions[:, 0]**2, dx=self.dx, dim=-1)
+        #energy_final = torch.trapz(predictions[:, -1]**2, dx=self.dx, dim=-1)
+        #energy_conservation = (energy_final - energy_initial).pow(2).mean()
         
         # Scale the losses
         total_loss = (
             physics_loss + 
-            0.1 * mass_conservation + 
-            0.1 * energy_conservation
-        )
+            0.1 * mass_conservation #+ 
+            #0.1 * energy_conservation                  ## energy not conserved in burgers equation
+        ) 
         
         return  total_loss
 
@@ -838,10 +879,12 @@ class SoftmaxMultiSourceIntegration(EnhancedMultiSourceBase):
         # Initialize predictions list with the initial state
         predictions_list = [analysis_state[:, 0]]
         
+        #print(analysis_state.shape)
         # Loop over timesteps to make predictions
         for t in range(analysis_state.shape[1] - 1):
             # Get the current state (last prediction)
             current_state = predictions_list[-1]
+            #print(current_state.shape)
             
             # Make prediction for the next timestep
             next_prediction, _ = self.prediction_module(current_state)
@@ -860,7 +903,7 @@ class SoftmaxMultiSourceIntegration(EnhancedMultiSourceBase):
         physics_loss = self.compute_physics_loss(predictions) if is_training else torch.tensor(0.0)
         
         # Combine losses
-        total_loss = loss + 1e-4 * physics_loss
+        total_loss = loss + 1e-5 * physics_loss
         
         return total_loss, {
             'loss': total_loss.item(),
@@ -879,9 +922,9 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
         hidden_dim: int = 128,
         n_prediction_steps: int = 5,
         dt: float = 0.001,
-        rho: float = 0.1,
+        rho: float = 0.005,
         multiplier_lr: float = 0.01,
-        multiplier_update_frequency: int = 5
+        multiplier_update_frequency: int = 2
     ):
         super().__init__(
             n_sources=n_sources,
@@ -908,7 +951,7 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
 
         # Apply equality constraint
         sum_weights = weights.sum()
-        weights = weights / (sum_weights + 1e-8)  # Normalize to sum to 1
+        weights = weights / (sum_weights + 1e-10)  # Normalize to sum to 1
         
         # Apply non-negativity constraint
         #weights = F.relu(weights)  # Ensure non-negative
@@ -979,19 +1022,14 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
             'constraint_loss': constraint_loss.item()
         }
 
-    def update_multipliers(self, weights: torch.Tensor):
-        """Two-timescale update for Lagrange multipliers"""
-        self.multiplier_update_counter += 1
-        
+    def update_multipliers(self, weights):
         if self.multiplier_update_counter % self.multiplier_update_frequency == 0:
             with torch.no_grad():
-                # Update for equality constraint
-                g = weights.sum() - 1.0
-                self.mu.data += self.multiplier_lr * self.rho * g
-                
-                # Update for inequality constraints
-                h = -weights
+                source_rel = self.compute_source_reliability()
+                # More aggressive penalty for noisy sources
+                h = -weights * (1 - source_rel)
                 self.nu.data += self.multiplier_lr * self.rho * torch.relu(h)
+
     
     def compute_loss(
         self,
@@ -1031,9 +1069,9 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
         # Compute loss between predictions and analysis state
         loss = F.l1_loss(predictions, analysis_state)
         
-        valid_samples = analysis_state.shape[1]
-        if valid_samples > 0:
-            loss = loss / valid_samples
+        # valid_samples = analysis_state.shape[1]
+        # if valid_samples > 0:
+        #     loss = loss / valid_samples
         
         physics_loss = 0
         predictions_list = predictions
@@ -1043,22 +1081,23 @@ class TwoTimeScaleLagrangianOptimizer(EnhancedMultiSourceBase):
             # Constraint losses
             constraint_loss, constraint_dict = self.compute_constraint_losses(weights)
             
+            constraint_loss  = max(constraint_loss, 0)
             # Lagrangian multiplier terms
-            equality_constraint = torch.abs(weights.sum() - 1.0)
-            inequality_constraint = torch.relu(-weights).sum()
+            # equality_constraint = torch.abs(weights.sum() - 1.0)
+            # inequality_constraint = torch.relu(-weights).sum()
             
-            multiplier_loss = (
-                self.mu * equality_constraint +
-                (self.nu * inequality_constraint).sum() +
-                0.5 * self.rho * (equality_constraint**2 + inequality_constraint.pow(2).sum())
-            )
+            # multiplier_loss = (
+            #     self.mu * equality_constraint +
+            #     (self.nu * inequality_constraint).sum() +
+            #     0.5 * self.rho * (equality_constraint**2 + inequality_constraint.pow(2).sum())
+            # )
             
             # Total loss
             total_loss = (
                 loss +
                 1e-4 * physics_loss +
-                constraint_loss +
-                multiplier_loss
+                1e-3 * constraint_loss #+
+                #1e-3 * multiplier_loss
             )
         else:
             total_loss = loss
@@ -1221,42 +1260,37 @@ class ComparativeTrainer:
         true_loss_lag = 0.0
         
         with torch.no_grad():
-            # Get initial states
-            analysis_state_soft, _ = self.softmax_model.get_analysis_state(measurements)
-            analysis_state_lag, _ = self.lagrangian_model.get_analysis_state(measurements)
-
-            # Autoregressive predictions for both models
-            soft_preds = [analysis_state_soft[:, 0]]
-            lag_preds = [analysis_state_lag[:, 0]]
+            # Get initial states (use first timestep of true solution as starting point)
+            initial_state = true_solution[:, 0]  # [batch, spatial]
             
-            current_soft = analysis_state_soft[:, 0]
-            current_lag = analysis_state_lag[:, 0]
+            # Initialize predictions with correct shape
+            pred_steps = true_solution.shape[1]
+            soft_preds = torch.zeros_like(true_solution)
+            lag_preds = torch.zeros_like(true_solution)
             
-            for t in range(true_solution.shape[1] - 1):
+            # Set initial condition
+            soft_preds[:, 0] = initial_state
+            lag_preds[:, 0] = initial_state
+            
+            # Autoregressive prediction
+            current_soft = initial_state
+            current_lag = initial_state
+            
+            for t in range(1, pred_steps):
                 # Softmax prediction
                 pred_soft, _ = self.softmax_model(current_soft)
-                soft_preds.append(pred_soft)
+                soft_preds[:, t] = pred_soft
                 current_soft = pred_soft
                 
                 # Lagrangian prediction
                 pred_lag, _ = self.lagrangian_model(current_lag)
-                lag_preds.append(pred_lag)
+                lag_preds[:, t] = pred_lag
                 current_lag = pred_lag
-
-            # Stack predictions [batch, timesteps, features]
-            soft_preds = torch.stack(soft_preds, dim=1)
-            lag_preds = torch.stack(lag_preds, dim=1)
             
-            # Ensure matching dimensions
-            if true_solution is not None:
-                true_loss_soft = F.mse_loss(
-                    soft_preds[:, :true_solution.shape[1]], 
-                    true_solution[:, :soft_preds.shape[1]]
-                )
-                true_loss_lag = F.mse_loss(
-                    lag_preds[:, :true_solution.shape[1]], 
-                    true_solution[:, :lag_preds.shape[1]]
-                )
+            # Calculate losses (now perfectly aligned)
+            true_loss_soft = F.mse_loss(soft_preds, true_solution)
+            true_loss_lag = F.mse_loss(lag_preds, true_solution)
+
 
         return {
             'softmax': {
@@ -1296,31 +1330,42 @@ class ComparativeTrainer:
                 x = batch['x'].to(self.device)
                 measurements = batch['measurements'].to(self.device)
                 true_solution = batch['true_solution'].to(self.device)
+                batch_size, n_timesteps, n_features = true_solution.shape
                 
-                # Get predictions for all timesteps
-                soft_preds, lag_preds = [], []
+                # Initialize prediction tensors
+                soft_preds = torch.zeros_like(true_solution)
+                lag_preds = torch.zeros_like(true_solution)
                 
-                # Softmax model predictions
-                current_state = x
-                for t in range(true_solution.shape[1]):
-                    pred, _ = self.softmax_model(current_state)
-                    soft_preds.append(pred)
-                    current_state = pred  # Autoregressive update
+                # Set initial conditions
+                soft_preds[:, 0] = x
+                lag_preds[:, 0] = x
                 
-                # Lagrangian model predictions
-                current_state = x
-                for t in range(true_solution.shape[1]):
-                    pred, _ = self.lagrangian_model(current_state)
-                    lag_preds.append(pred)
-                    current_state = pred  # Autoregressive update
+                # Track per-timestep losses
+                soft_timestep_losses = torch.zeros(n_timesteps, device=self.device)
+                lag_timestep_losses = torch.zeros(n_timesteps, device=self.device)
                 
-                # Stack predictions [batch, timesteps, features]
-                soft_preds = torch.stack(soft_preds, dim=1)
-                lag_preds = torch.stack(lag_preds, dim=1)
+                # Autoregressive prediction
+                current_soft = x
+                current_lag = x
+                for t in range(1, n_timesteps):
+                    # Softmax prediction
+                    pred_soft, _ = self.softmax_model(current_soft)
+                    soft_preds[:, t] = pred_soft
+                    current_soft = pred_soft
+                    
+                    # Lagrangian prediction
+                    pred_lag, _ = self.lagrangian_model(current_lag)
+                    lag_preds[:, t] = pred_lag
+                    current_lag = pred_lag
+                    
+                    # Track per-timestep losses
+                    soft_timestep_losses[t] = F.mse_loss(pred_soft, true_solution[:, t])
+                    lag_timestep_losses[t] = F.mse_loss(pred_lag, true_solution[:, t])
                 
-                # Calculate losses per timestep
+                # Calculate overall losses
                 soft_loss = F.mse_loss(soft_preds, true_solution)
                 lag_loss = F.mse_loss(lag_preds, true_solution)
+
                 
                 val_metrics['softmax']['loss'].append(soft_loss.item())
                 val_metrics['lagrangian']['loss'].append(lag_loss.item())
@@ -1354,7 +1399,7 @@ def plot_comparative_results(
              label='Softmax', color='blue', alpha=0.7)
     ax1.plot(trainer.metrics['lagrangian']['loss'],
              label='Lagrangian', color='red', alpha=0.7)
-    ax1.set_title('Training Loss', fontsize=12)
+    ax1.set_title('Training Loss', fontsize=20)
     ax1.set_xlabel('Epoch')
     ax1.set_ylabel('Loss')
     ax1.legend()
@@ -1383,7 +1428,7 @@ def plot_comparative_results(
         ax2.bar(np.arange(len(weights_lag)) + 0.2, 
                 weights_lag, 0.4,
                 label='Lagrangian', color='red', alpha=0.7)
-    ax2.set_title('Weight Distribution', fontsize=12)
+    ax2.set_title('Weight Distribution', fontsize=20)
     ax2.set_xlabel('Source Index')
     ax2.set_ylabel('Weight Value')
     ax2.legend()
@@ -1395,7 +1440,7 @@ def plot_comparative_results(
              label='Softmax', color='blue', alpha=0.7)
     ax3.plot(trainer.metrics['lagrangian']['physics_loss'],
              label='Lagrangian', color='red', alpha=0.7)
-    ax3.set_title('Physics Loss', fontsize=12)
+    ax3.set_title('Physics Loss', fontsize=20)
     ax3.set_xlabel('Epoch')
     ax3.set_ylabel('Loss')
     ax3.legend()
@@ -1422,8 +1467,14 @@ def plot_comparative_results(
     with torch.no_grad():
         predictions_soft = []
         predictions_lag = []
-        current_soft = x.clone()  # Keep full spatial dimension [1, 64]
-        current_lag = x.clone()   # [batch_size=1, input_dim=64]
+        initial_state = true_solution[0]
+        soft_preds = torch.zeros_like(true_solution)
+        lag_preds = torch.zeros_like(true_solution)
+
+        soft_preds = initial_state.unsqueeze(0)
+        lag_preds = initial_state.unsqueeze(0)
+        current_lag, current_soft = initial_state.clone(), initial_state.clone()
+
         
         for t in range(true_solution.shape[0]):  # For each timestep
             # Get full predictions
@@ -1431,8 +1482,8 @@ def plot_comparative_results(
             pred_lag, _ = trainer.lagrangian_model(current_lag, measurements)
             
             # Store full predictions
-            predictions_soft.append(pred_soft)
-            predictions_lag.append(pred_lag)
+            predictions_soft.append(pred_soft.unsqueeze(0))
+            predictions_lag.append(pred_lag.unsqueeze(0))
             
             # Update current state with full prediction
             current_soft = pred_soft.detach()
@@ -1448,8 +1499,8 @@ def plot_comparative_results(
     time_steps = np.arange(true_solution.shape[0])
     print(predictions_lag.shape, predictions_soft.shape, true_solution.shape)
     #print(true_solution.shape, predictions_soft.shape, predictions_lag.shape)
-    print(predictions_soft[0, spatial_point].cpu().numpy())
-    print(predictions_lag[0, spatial_point].cpu().numpy())
+    print(predictions_soft[0, :, spatial_point].cpu().numpy())
+    print(predictions_lag[0, :, spatial_point].cpu().numpy())
     # Plot true solution
     print(predictions_lag.shape, predictions_soft.shape)
     true_line = ax4.plot(time_steps, 
@@ -1500,7 +1551,7 @@ def plot_comparative_results(
     
     ax4.set_ylim([y_min, y_max])
     ax4.ticklabel_format(style='plain')
-    ax4.set_title(f'Time Evolution at x={spatial_point}', fontsize=12)
+    ax4.set_title(f'Time Evolution at x={spatial_point}', fontsize=20)
     ax4.legend(legend_handles, legend_labels,
               bbox_to_anchor=(1.05, 1),
               loc='upper left',
@@ -1534,7 +1585,7 @@ def plot_comparative_results(
             color='red', alpha=0.2
         )
     
-    ax5.set_title('Weight Evolution', fontsize=12)
+    ax5.set_title('Weight Evolution', fontsize=20)
     ax5.set_xlabel('Epoch')
     ax5.set_ylabel('Weight Value')
     ax5.legend()
@@ -1547,7 +1598,7 @@ def plot_comparative_results(
                  label='Softmax', color='blue', alpha=0.7)
         ax6.plot(trainer.metrics['lagrangian']['true_error'],
                  label='Lagrangian', color='red', alpha=0.7)
-        ax6.set_title('True Solution Error', fontsize=12)
+        ax6.set_title('True Solution Error', fontsize=20)
         ax6.set_xlabel('Epoch')
         ax6.set_ylabel('Error')
         ax6.legend()
@@ -1594,15 +1645,17 @@ def plot_prediction_comparison(
     with torch.no_grad():
         predictions_soft = []
         predictions_lag = []
-        current_soft = x.clone()  # [1, 64]
-        current_lag = x.clone()
+        initial_state = true_solution[0]
+        soft_preds = initial_state.unsqueeze(0)
+        lag_preds = initial_state.unsqueeze(0)
+        current_lag, current_soft = initial_state.clone(), initial_state.clone()
         
         for t in range(true_solution.shape[0]):
             pred_soft, _ = trainer.softmax_model(current_soft, measurements)
             pred_lag, _ = trainer.lagrangian_model(current_lag, measurements)
             
-            predictions_soft.append(pred_soft)
-            predictions_lag.append(pred_lag)
+            predictions_soft.append(pred_soft.unsqueeze(0))
+            predictions_lag.append(pred_lag.unsqueeze(0))
             
             current_soft = pred_soft
             current_lag = pred_lag
@@ -1653,17 +1706,16 @@ def plot_prediction_comparison(
         
         # Create title with weights
         title = f'Spatial Point x = {spatial_point/dataset.input_dim:.2f}\n'
-        subtitle = (f'Weights (Softmax): {weights_soft}\n'
-                   f'Weights (Lagrangian): {weights_lag}')
         
-        ax.set_title(title + subtitle, fontsize=10, pad=10)
-        ax.set_xlabel('Time Steps', fontsize=10)
-        ax.set_ylabel('Value', fontsize=10)
+        
+        ax.set_title(title, fontsize=20, pad=10)
+        ax.set_xlabel('Time Steps', fontsize=20)
+        ax.set_ylabel('Value', fontsize=20)
         ax.grid(True, alpha=0.3)
         
         # Move legend outside of plot
         ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
-                 fontsize=9, frameon=True, fancybox=True, shadow=True)
+                 fontsize=20, frameon=True, fancybox=True, shadow=True)
         # Set y-limits
         y_data = [true_solution[spatial_point].detach().cpu().numpy(),
                  predictions_soft[0, :, spatial_point].detach().cpu().numpy(),
@@ -1684,12 +1736,15 @@ def plot_prediction_comparison(
         ax.grid(True, which='minor', alpha=0.15)
         ax.grid(True, which='major', alpha=0.3)
     
+    weights_text = f"Softmax Weights: {', '.join(weights_soft)}\nLagrangian Weights: {', '.join(weights_lag)}"
+    fig.text(0.48, 0.985, weights_text, ha='center', va='top', fontsize=16, fontweight='bold')
+
     # Adjust layout
     plt.tight_layout()
     
     # Add main title with padding
     fig.suptitle(f'Solution Evolution at Different Spatial Points (Epoch {epoch})', 
-                 y=1.02, fontsize=14, fontweight='bold')
+                 y=1.02, fontsize=20, fontweight='bold')
     
     # Adjust spacing for legends
     plt.subplots_adjust(right=0.85)
@@ -1704,7 +1759,7 @@ def plot_prediction_comparison(
 def main():
     """Main training script"""
     # Parameters
-    n_samples = 2048 # multiple of batch size
+    n_samples = 1024 # multiple of batch size
     input_dim = 64
     n_sources = 3
     batch_size = 64
@@ -1743,22 +1798,22 @@ def main():
     softmax_model = SoftmaxMultiSourceIntegration(
         n_sources=n_sources,
         input_dim=input_dim,
-        hidden_dim=128,
-        n_prediction_steps=batch_size   )
+        hidden_dim=512,
+        n_prediction_steps=timesteps   )
     
     lagrangian_model = TwoTimeScaleLagrangianOptimizer(
         n_sources=n_sources,
         input_dim=input_dim,
-        hidden_dim=128,
-        n_prediction_steps=batch_size,
+        hidden_dim=512,
+        n_prediction_steps=timesteps,
     )
     
     # Create trainer
     trainer = ComparativeTrainer(
         softmax_model=softmax_model,
         lagrangian_model=lagrangian_model,
-        lr_softmax=1e-4,
-        lr_theta=1e-3,
+        lr_softmax=1e-5,
+        lr_theta=5e-6,
         lr_lambda=1e-5,
         device=device
     )
