@@ -545,7 +545,7 @@ class MultiSolverSystem(nn.Module):
        # Get routing weights
        if self.use_lagrangian:
            # Use Lagrangian weights
-           weights = F.softmax(self.lambda_weights, dim=0)  # [n_solvers]
+           weights = self.lambda_weights # F.softmax(self.lambda_weights, dim=0)  # [n_solvers]
            weights = weights.view(1, -1, 1, 1, 1).expand(grid.size(0), -1, 1, 1, 1)
        else:
            # Use router weights
@@ -919,7 +919,7 @@ def plot_solver_outputs(
                    handles=legend_elements,
                    loc='center left',
                    bbox_to_anchor=(1.02, 0.5),
-                   fontsize=10
+                   fontsize=18
                )
   
    plt.tight_layout()
@@ -1148,10 +1148,10 @@ class Trainer:
                self.all_metrics[f'train_{k}'] = [v]
            else:
                self.all_metrics[f'train_{k}'].append(v)
-       print(averaged_metrics, "\n")
+       #print(averaged_metrics, "\n")
        for k, v in averaged_metrics.items():
            self.metrics[f'{k}'].append(v)
-       print("inside training epoch: ", self.all_metrics)
+       #print("inside training epoch: ", self.all_metrics)
        return averaged_metrics
 
    def train_step(self, batch: Dict[str, torch.Tensor]) -> Dict[str, float]:
@@ -1340,7 +1340,7 @@ def plot_detailed_analysis(trainers, dataset, epoch, save_dir):
    ax4.legend()
   
    # Add overall title
-   plt.suptitle(f'Training Analysis - Epoch {epoch}', y=1.02, fontsize=14)
+   plt.suptitle(f'Training Analysis - Epoch {epoch}', y=1.02, fontsize=18)
   
    # Save figure
    plt.tight_layout()
@@ -1354,9 +1354,9 @@ def plot_detailed_analysis(trainers, dataset, epoch, save_dir):
 def main():
    # Parameters
    domain_size = 32
-   n_samples = 10
+   n_samples = 1024 
    batch_size = 16
-   n_epochs = 200
+   n_epochs = 400
    device = 'cpu' #torch.device('cuda' if torch.cuda.is_available() else 'cpu')
    save_dir = "results"
    print(f"Using device: {device}")
@@ -1442,7 +1442,7 @@ def main():
                )
   
    # Plot comparison metrics
-   plot_comparison(trainers, epoch + 1, save_dir)
+   plot_comparison_separate(trainers, epoch + 1, save_dir)
    print("\nTraining completed!")
 
 

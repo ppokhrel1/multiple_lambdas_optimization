@@ -325,7 +325,7 @@ class LagrangianSourceIntegration(nn.Module):
        confidences: torch.Tensor
    ) -> Tuple[torch.Tensor, Dict]:
        # Get normalized weights
-       weights = F.softmax(self.lambda_weights, dim=0)
+       weights = self.lambda_weights #F.softmax(self.lambda_weights, dim=0)
       
        # Compute source-specific losses
        source_losses = []
@@ -386,7 +386,7 @@ class LagrangianSourceIntegration(nn.Module):
        confidences = torch.stack(confidences, dim=1)  # [batch_size, n_sources, 1]
       
        # Always normalize weights using softmax
-       normalized_weights = F.softmax(self.lambda_weights, dim=0)
+       normalized_weights = self.lambda_weights #F.softmax(self.lambda_weights, dim=0)
        weights = normalized_weights.view(1, -1, 1)
       
        # Combine using normalized weights
@@ -1210,7 +1210,7 @@ def plot_predictions_and_weights(
                    top_weights, _ = torch.topk(raw_weights, min(top_k, len(raw_weights)))
                weights[model_name] = top_weights
            else:  # Lagrangian
-               raw_weights = F.softmax(model.lambda_weights, dim=0).detach().cpu()
+               raw_weights = model.lambda_weights.detach().cpu() #F.softmax(model.lambda_weights, dim=0).detach().cpu()
                # Get top-k weights
                top_weights, _ = torch.topk(raw_weights, min(top_k, len(raw_weights)))
                weights[model_name] = top_weights

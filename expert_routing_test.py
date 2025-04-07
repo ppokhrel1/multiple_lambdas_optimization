@@ -1485,7 +1485,7 @@ def main():
        input_dim = 64
        hidden_dim = 128
        batch_size = 16  # Reduced batch size
-       n_epochs = 200
+       n_epochs = 500
        lr = 1e-4  # Reduced learning rate
        rho = 0.1  # Reduced rho
        temperature = 2.0  # Increased temperature for softer softmax
