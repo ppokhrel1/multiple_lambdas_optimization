@@ -1,22 +1,97 @@
+# Generalized Multi-source Assimilation: A Framework for Cross-Modal Integration and Source Optimization
 
-# multiple_lambdas_optimization
+**Authors**: Pujan Pokhrel, Austin Schmidt, Elias Ioup, Mahdi Abdelguerfi
 
-This repository contains code for optimizing multiple lambda values across various scenarios, focusing on applications such as data assimilation, expert routing, and large-scale optimization problems. The project provides Python test scripts that evaluate different optimization strategies and solve partial differential equations (PDEs) with multi-source inputs. The goal is to improve computational efficiency and accuracy in environmental, logistics, and related optimization tasks.
+This repository contains code for optimizing multiple lambda values across various scenarios, focusing on applications such as data assimilation, expert routing, and large-scale optimization problems. The goal is to improve computational efficiency and accuracy in environmental, logistics, and related scientific tasks.
 
-## Key Features:
-- **Data Assimilation**: Includes scripts to test and implement data assimilation techniques.
-- **Expert Routing**: Implements optimization solutions for routing problems with expert systems.
-- **Large-Scale Optimization**: Scalable approaches to tackle complex optimization tasks involving multiple sources.
-- **PDE Solvers**: Validates and tests multi-source PDE solvers for optimal solutions.
+We propose a flexible and scalable architecture that performs:
 
-## Recent Updates:
-- Files have been reorganized for better structure and maintainability.
-- Improved support for handling large-scale multi-source optimization scenarios.
+- **Multi-source data assimilation**
+- **Cross-modal optimization of lambda hyperparameters**
+- **Physics-informed modeling using PDE solvers**
+- **Expert system integration via Lagrangian-based routing**
 
-## Installation & Usage:
-1. Clone this repository:
-   ```bash
-   git clone git@github.com:ppokhrel1/multiple_lambdas_optimization.git
+---
 
+## 🔍 Overview
 
+Our framework is designed for large-scale scientific and logistical applications where combining information from heterogeneous modalities (e.g., sensor networks, numerical models, expert systems) is critical to accuracy and decision-making.
 
+---
+
+## 🚀 Key Modules
+
+- `data_assimilation_test.py`: Implements and benchmarks data assimilation strategies for source fusion.
+- `expert_routing_test.py`: Uses Lagrangian losses to improve expert-based path optimization.
+- `large_scale_multi_source_test.py`: Evaluates multi-source integration in large-scale optimization settings.
+- `multi_source_pde_solver_test.py`: Tests PDE solvers using cross-modal lambda tuning.
+- `testing_data_assimilation.py`: Includes experiments on visual tuning, output formatting, and DA diagnostics.
+
+---
+
+## 📦 Features
+
+- ✅ **Multi-Modal Lambda Optimization**: Automatically tunes weighting parameters across sources.
+- ✅ **Lagrangian Loss Integration**: Enforces physics consistency via trajectory-informed loss functions.
+- ✅ **Plug-and-Play Architecture**: Drop-in ready components for new data sources or simulation tasks.
+- ✅ **Scalability**: Efficient for both small-scale tests and large-scale simulations on HPC or cloud systems.
+
+---
+
+## 📁 File Structure
+
+```
+├── README.md
+├── data_assimilation_test.py
+├── expert_routing_test.py
+├── large_scale_multi_source_test.py
+├── multi_source_pde_solver_test.py
+├── testing_data_assimilation.py
+├── .README.swp
+```
+
+---
+
+## 🧪 Getting Started
+
+To clone the repo:
+
+```bash
+git clone git@github.com:ppokhrel1/multiple_lambdas_optimization.git
+cd multiple_lambdas_optimization
+```
+
+To run a sample assimilation test:
+
+```bash
+python data_assimilation_test.py
+```
+
+To evaluate expert routing performance:
+
+```bash
+python expert_routing_test.py
+```
+
+Make sure to configure the input parameters and lambda values in the scripts or via config files.
+
+---
+
+## 🧠 Citation
+
+If you find this work useful in your research, please cite:
+
+```bibtex
+@article{pokhrel2025generalized,
+  title={Generalized Multi-source Assimilation: A Framework for Cross-Modal Integration and Source Optimization},
+  author={Pokhrel, Pujan and Schmidt, Austin and Ioup, Elias and Abdelguerfi, Mahdi},
+  journal={To appear},
+  year={2025}
+}
+```
+
+---
+
+## 📬 Contact
+
+For questions, feedback, or collaboration inquiries, reach out to [Pujan Pokhrel](mailto:pujan@pokhrel.org).
