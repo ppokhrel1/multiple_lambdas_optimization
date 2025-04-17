@@ -2,7 +2,9 @@
 
 **Authors**: Pujan Pokhrel, Austin Schmidt, Elias Ioup, Mahdi Abdelguerfi
 
-This repository contains code for optimizing multiple lambda values across various scenarios, focusing on applications such as data assimilation, expert routing, and large-scale optimization problems. The goal is to improve computational efficiency and accuracy in environmental, logistics, and related scientific tasks. Our framework is designed for large-scale scientific and logistical applications where combining information from heterogeneous modalities (e.g., sensor networks, numerical models, expert systems) is critical to accuracy and decision-making.
+This repository contains code for optimizing multiple lambda values across various scenarios, focusing on applications such as data assimilation, expert routing, and large-scale optimization problems. The goal is to improve computational efficiency and accuracy in environmental, logistics, and related scientific tasks. 
+
+The framework supports rigorous constraint satisfaction, scalable integration, and automatic tuning of source reliability. It is designed for large-scale scientific and logistical applications where combining information from heterogeneous modalities (e.g., sensor networks, numerical models, expert systems) is critical to accuracy and decision-making.
 
 We propose a flexible and scalable architecture that performs:
 
