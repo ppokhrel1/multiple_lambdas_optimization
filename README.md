@@ -47,7 +47,6 @@ Our framework is designed for large-scale scientific and logistical applications
 ├── large_scale_multi_source_test.py
 ├── multi_source_pde_solver_test.py
 ├── testing_data_assimilation.py
-├── .README.swp
 ```
 
 ---
