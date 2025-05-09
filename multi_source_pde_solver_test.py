@@ -962,7 +962,7 @@ def plot_predictions(trainer, sample, save_dir, epoch, method_name, colors):
     fig, axes = plt.subplots(1, 3, figsize=(20, 5))
 
     for i, title in enumerate(titles):
-        im = axes[i].imshow(output[0, 0].cpu(), cmap='RdBu', alpha=0.3)
+        im = axes[i].imshow(output[0, i].cpu(), cmap='RdBu', alpha=0.3)
         plt.colorbar(im, ax=axes[i])
         # contour = axes[i].contour(
         #     output[0][0].cpu(),
@@ -971,7 +971,7 @@ def plot_predictions(trainer, sample, save_dir, epoch, method_name, colors):
         #     alpha=0.7,
         #     linewidths=2
         # )
-        mse = F.mse_loss(output[0, 0], target[i]).item()
+        mse = F.mse_loss(output[0, i], target[i]).item()
         axes[i].set_title(f'{method_name} {title}\nMSE: {mse:.2e}')
         axes[i].set_xlabel('x')
         axes[i].set_ylabel('y')
