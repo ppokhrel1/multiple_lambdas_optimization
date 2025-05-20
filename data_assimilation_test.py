@@ -48,7 +48,7 @@ class MultiSourceModel(tf.keras.Model):
     def call(self, inputs):
         x = self.hidden(inputs)
         output = self.output_layer(x)
-        lambdas = self.lambda_net(inputs)
+        # lambdas = self.lambda_net(inputs) # use either softmax to scale to 1 or the lagrangian
         return output, lambdas
 
 # Custom Loss Function
