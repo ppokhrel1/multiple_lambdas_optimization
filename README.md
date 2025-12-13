@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Generalized Multi-source Assimilation: A Framework for Cross-Modal Integration and Source Optimization
 
 **Authors**: Pujan Pokhrel, Austin Schmidt, Elias Ioup, Mahdi Abdelguerfi
@@ -114,3 +115,7 @@ If you find this work useful in your research, please cite:
 ## 📬 Contact
 
 For questions, feedback, or collaboration inquiries, reach out to [Pujan Pokhrel](mailto:pujan@pokhrel.org).
+=======
+# multiple_lambdas_optimization
+Repository for multiple lambda optimization in different scenarios
+>>>>>>> 0707c66 (Initial commit)
