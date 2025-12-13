@@ -422,11 +422,18 @@ class SoftmaxExpertSystem(nn.Module):
    ) -> Tuple[torch.Tensor, Dict]:
        # Forward pass
        combined, metadata = self.forward(x, return_all=True)
+       solver_outputs = metadata['solver_outputs']
       
        # Reconstruction loss
-       recon_loss = F.mse_loss(combined, target)
+       recon_loss = self.huber(combined, target)
       
-       recon_loss = self.huber(solver_outputs, target.expand_as(solver_outputs))
+       # Individual solver losses for load balancing
+       solver_losses = []
+       for i in range(self.n_experts):
+           loss = self.huber(solver_outputs[:, i], target)
+           solver_losses.append(loss)
+       solver_losses = torch.stack(solver_losses)
+      
        # Load balancing loss
        usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
        target_prob = torch.ones_like(usage_prob) / self.n_experts
@@ -438,8 +445,8 @@ class SoftmaxExpertSystem(nn.Module):
        total_loss = recon_loss + 0.1 * balance_loss
       
        metadata.update({
-           'recon_loss': recon_loss,
-           'balance_loss': balance_loss
+           'recon_loss': recon_loss.item(),
+           'balance_loss': balance_loss.item()
        })
       
        return total_loss, metadata
@@ -447,6 +454,275 @@ class SoftmaxExpertSystem(nn.Module):
 
 
 
+# New ADMM Expert System
+class ADMMExpertSystem(nn.Module):
+   """Expert system using ADMM-based optimization"""
+   def __init__(
+       self,
+       solvers: List[BasePDESolver],
+       input_dim: int,
+       hidden_dim: int = 64,
+       rho: float = 1.0,
+       device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+   ):
+       super().__init__()
+       self.solvers = nn.ModuleList(solvers)
+       self.n_experts = len(solvers)
+       self.input_dim = input_dim
+       self.device = device
+       self.rho = rho
+      
+       # Router network
+       self.router = nn.Sequential(
+           nn.Linear(input_dim, hidden_dim),
+           nn.ReLU(),
+           nn.Linear(hidden_dim, hidden_dim),
+           nn.ReLU(),
+           nn.Linear(hidden_dim, self.n_experts)
+       )
+      
+       # ADMM variables
+       self.z = nn.Parameter(torch.ones(self.n_experts) / self.n_experts)  # Auxiliary variable
+       self.u = nn.Parameter(torch.zeros(self.n_experts))  # Dual variable
+      
+       self.huber = HuberLoss(delta=1.0)
+       # Expert usage tracking
+       self.register_buffer('usage_count', torch.zeros(self.n_experts))
+  
+   def forward(
+       self,
+       x: torch.Tensor,
+       return_all: bool = False
+   ) -> Tuple[torch.Tensor, Dict]:
+       # Get routing weights
+       logits = self.router(x)
+       weights = F.softmax(logits, dim=-1)
+      
+       # Get solutions from all solvers
+       solver_outputs = []
+       for solver in self.solvers:
+           output = solver(x)
+           solver_outputs.append(output)
+      
+       solver_outputs = torch.stack(solver_outputs, dim=1)
+      
+       # Update usage statistics
+       with torch.no_grad():
+           self.usage_count += weights.sum(dim=0)
+      
+       # Weighted combination
+       combined = (solver_outputs * weights.unsqueeze(-1)).sum(dim=1)
+      
+       metadata = {
+           'weights': weights,
+           'regime_weights': weights,
+           'usage_count': self.usage_count.clone(),
+           'z': self.z.detach(),
+           'u': self.u.detach()
+       }
+      
+       if return_all:
+           metadata['solver_outputs'] = solver_outputs
+      
+       return combined, metadata
+  
+   def compute_loss(
+       self,
+       x: torch.Tensor,
+       target: torch.Tensor
+   ) -> Tuple[torch.Tensor, Dict]:
+       # Forward pass
+       combined, metadata = self.forward(x, return_all=True)
+       solver_outputs = metadata['solver_outputs']
+      
+       # Reconstruction loss
+       recon_loss = self.huber(combined, target)
+      
+       # ADMM loss components
+       weights_mean = metadata['weights'].mean(dim=0)  # Average over batch
+       
+       # Primal residual
+       r = weights_mean - self.z
+       
+       # Augmented Lagrangian term
+       admm_loss = 0.5 * self.rho * torch.norm(r) ** 2 + torch.dot(self.u, r)
+       
+       # Simplex constraint penalty (z should be on probability simplex)
+       simplex_loss = torch.relu(-self.z).sum() + torch.relu(self.z.sum() - 1) ** 2
+       
+       # Load balancing regularization
+       usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
+       target_prob = torch.ones_like(usage_prob) / self.n_experts
+       balance_loss = F.kl_div(usage_prob.log(), target_prob, reduction='sum')
+       
+       # Total loss
+       total_loss = recon_loss + admm_loss + 0.1 * simplex_loss + 0.1 * balance_loss
+      
+       metadata.update({
+           'recon_loss': recon_loss.item(),
+           'admm_loss': admm_loss.item(),
+           'simplex_loss': simplex_loss.item(),
+           'balance_loss': balance_loss.item(),
+           'primal_residual': torch.norm(r).item()
+       })
+      
+       return total_loss, metadata
+  
+   def update_admm_variables(self):
+       """Update ADMM variables (z and u) - should be called after optimizer step"""
+       with torch.no_grad():
+           # Update z (project onto simplex)
+           weights = self.router(torch.randn(1, self.input_dim, device=self.device))
+           weights_mean = F.softmax(weights, dim=-1).mean(dim=0)
+           
+           # z-update with projection to simplex
+           z_new = weights_mean + self.u / self.rho
+           self.z.data = self._project_simplex(z_new)
+           
+           # u-update
+           self.u.data += self.rho * (weights_mean - self.z)
+   
+   @staticmethod
+   def _project_simplex(v: torch.Tensor) -> torch.Tensor:
+       """Project onto probability simplex"""
+       v_sorted, _ = torch.sort(v, descending=True)
+       cssv = torch.cumsum(v_sorted, dim=0)
+       rho = (cssv - 1) / torch.arange(1, len(v) + 1, device=v.device)
+       rho_star = rho[torch.where(v_sorted > rho)[0][-1]]
+       return torch.maximum(v - rho_star, torch.zeros_like(v))
+
+
+# New Single Time Scale Lagrangian System
+class SingleTimeScaleLagrangianExpertSystem(nn.Module):
+   """Complete system using single time scale Lagrangian optimization"""
+   def __init__(
+       self,
+       solvers: List[BasePDESolver],
+       input_dim: int,
+       hidden_dim: int = 64,
+       rho: float = 1.0,
+       device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+   ):
+       super().__init__()
+       self.solvers = nn.ModuleList(solvers)
+       self.n_experts = len(solvers)
+       self.input_dim = input_dim
+       self.device = device
+       self.rho = rho
+      
+       # Store solver characteristics
+       self.solver_characteristics = [
+           solver.characteristics for solver in solvers
+       ]
+      
+       # Initialize router
+       self.router = nn.Sequential(
+           nn.Linear(input_dim, hidden_dim),
+           nn.ReLU(),
+           nn.Linear(hidden_dim, hidden_dim),
+           nn.ReLU(),
+           nn.Linear(hidden_dim, self.n_experts)
+       )
+      
+       # Lagrangian parameters - all optimized together
+       self.lambda_weights = nn.Parameter(torch.ones(self.n_experts) / self.n_experts)
+       self.mu = nn.Parameter(torch.zeros(1))
+       self.nu = nn.Parameter(torch.zeros(self.n_experts))
+
+       self.huber = HuberLoss(delta=1.0)
+       # Expert usage tracking
+       self.register_buffer('usage_count', torch.zeros(self.n_experts))
+  
+   def forward(
+       self,
+       x: torch.Tensor,
+       return_all: bool = False
+   ) -> Tuple[torch.Tensor, Dict]:
+       # Get routing weights from router network
+       router_logits = self.router(x)
+       router_weights = F.softmax(router_logits, dim=-1)
+      
+       # Combine with Lagrangian weights
+       combined_weights = F.softmax(self.lambda_weights, dim=0).unsqueeze(0) * router_weights
+       combined_weights = combined_weights / (combined_weights.sum(dim=-1, keepdim=True) + 1e-8)
+      
+       # Get solutions from all solvers
+       solver_outputs = []
+       for solver in self.solvers:
+           output = solver(x)
+           solver_outputs.append(output)
+      
+       solver_outputs = torch.stack(solver_outputs, dim=1)
+      
+       # Update usage statistics
+       with torch.no_grad():
+           self.usage_count += combined_weights.sum(dim=0)
+      
+       # Weighted combination
+       combined = (solver_outputs * combined_weights.unsqueeze(-1)).sum(dim=1)
+      
+       metadata = {
+           'weights': combined_weights,
+           'router_weights': router_weights,
+           'lambda_weights': self.lambda_weights,
+           'usage_count': self.usage_count.clone(),
+           'solver_outputs': solver_outputs if return_all else None
+       }
+      
+       if return_all:
+           metadata['solver_outputs'] = solver_outputs
+      
+       return combined, metadata
+  
+   def compute_loss(
+       self,
+       x: torch.Tensor,
+       target: torch.Tensor
+   ) -> Tuple[torch.Tensor, Dict]:
+       # Forward pass with all outputs
+       combined, metadata = self.forward(x, return_all=True)
+       solver_outputs = metadata['solver_outputs']
+      
+       # Reconstruction loss
+       recon_loss = self.huber(combined, target)
+      
+       # Compute individual solver losses
+       solver_losses = []
+       for i in range(self.n_experts):
+           loss = self.huber(solver_outputs[:, i], target)
+           solver_losses.append(loss)
+       solver_losses = torch.stack(solver_losses)
+      
+       # Lagrangian constraints
+       g_lambda = 1 - self.lambda_weights.sum()
+       h_lambda = -self.lambda_weights
+      
+       # Single time scale Lagrangian loss
+       lagrangian = recon_loss + \
+                   self.mu * g_lambda + \
+                   (self.nu * h_lambda).sum() + \
+                   (self.rho/2) * (g_lambda**2 + (torch.relu(h_lambda)**2).sum())
+      
+       # Add entropy regularization for exploration
+       entropy = -(F.softmax(self.lambda_weights, dim=0) *
+                  F.log_softmax(self.lambda_weights, dim=0)).sum()
+       lagrangian = lagrangian - 0.01 * entropy
+      
+       # Load balancing
+       usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
+       target_prob = torch.ones_like(usage_prob) / self.n_experts
+       balance_loss = F.kl_div(usage_prob.log(), target_prob, reduction='sum')
+       lagrangian = lagrangian + 0.1 * balance_loss
+      
+       metadata.update({
+           'g_lambda': g_lambda,
+           'h_lambda': h_lambda,
+           'recon_loss': recon_loss.item(),
+           'balance_loss': balance_loss.item(),
+           'solver_losses': solver_losses.detach()
+       })
+      
+       return lagrangian, metadata
 
 
 # Router Implementations
@@ -591,7 +867,109 @@ class LagrangianExpertRouter(nn.Module):
       
        return weights, metadata
 
-
+class SingleLearningRateLagrangianOptimizer:
+    """
+    Implements the Lagrangian optimization using a single torch.optim.Adam 
+    optimizer and a single learning rate for all parameters (theta and lambda).
+    """
+    def __init__(
+        self,
+        model: nn.Module,
+        eta: float = 1e-3,  # Single learning rate for all parameters
+        clipgrad: float = 1.0
+    ):
+        self.model = model
+        self.eta = eta
+        self.clipgrad = clipgrad
+       
+        # 🧪 Collect all parameters managed by the optimizer
+        trainable_params: List[nn.Parameter] = []
+        dual_params: List[nn.Parameter] = []
+       
+        for name, param in model.named_parameters():
+            if 'mu' in name or 'nu' in name:
+                # These are usually updated manually/separately, not by Adam
+                dual_params.append(param)
+            else:
+                # Include theta and lambda_weights in the single group
+                trainable_params.append(param)
+        
+        self.dual_params = dual_params # Store dual params for zero_grad
+       
+        # 🚀 Initialize a single optimizer with a single learning rate (eta)
+        self.optimizer = torch.optim.Adam(trainable_params, lr=eta)
+        
+        # Check if lambda_weights exists (needed for step/projection)
+        if not hasattr(self.model, 'lambda_weights'):
+             raise AttributeError("Model must have an attribute named 'lambda_weights' for projection.")
+ 
+    def zero_grad(self):
+        """Zeroes the gradients for all parameters managed by the optimizer and the dual params."""
+        self.optimizer.zero_grad()
+        # Manually zero gradients for dual parameters if they aren't included in the optimizer
+        for p in self.dual_params:
+            if p.grad is not None:
+                p.grad.zero_()
+   
+    def step(self):
+        """Performs a single optimization step."""
+        
+        # Clip gradients (applied globally before step)
+        torch.nn.utils.clip_grad_norm_(
+             self.optimizer.param_groups[0]['params'], # Only one group now
+             max_norm=self.clipgrad
+        )
+        
+        # Update model and lambda parameters using the single learning rate
+        self.optimizer.step()
+       
+        # 🔧 Apply projection and noise injection only to lambda_weights (manual step)
+        with torch.no_grad():
+            
+            # Project lambda weights onto simplex
+            self.model.lambda_weights.data = self.project_simplex(
+                self.model.lambda_weights.data
+            )
+            # Add small noise to break symmetry
+            noise = 0.01 * torch.randn_like(self.model.lambda_weights)
+            self.model.lambda_weights.data.add_(noise)
+            self.model.lambda_weights.data = self.project_simplex(
+                self.model.lambda_weights.data
+            )
+            
+    def state_dict(self):
+        """Returns the state of the optimizer and its config."""
+        return {
+            'optimizer': self.optimizer.state_dict(),
+            'eta': self.eta,
+            'clipgrad': self.clipgrad
+        }
+   
+    def load_state_dict(self, state_dict):
+        """Loads the optimizer state."""
+        self.optimizer.load_state_dict(state_dict['optimizer'])
+        # Re-initialize configuration parameters
+        self.eta = state_dict['eta']
+        self.clipgrad = state_dict['clipgrad']
+ 
+    @staticmethod
+    def project_simplex(v: torch.Tensor) -> torch.Tensor:
+        """Project onto probability simplex (L1 norm <= 1, v >= 0)"""
+        if v.ndim > 1:
+             raise ValueError("Input tensor for project_simplex must be 1D.")
+             
+        v_sorted, _ = torch.sort(v, descending=True)
+        cssv = torch.cumsum(v_sorted, dim=0)
+        rho = (cssv - 1) / torch.arange(1, len(v) + 1, device=v.device, dtype=v.dtype)
+        
+        valid_indices = torch.where(v_sorted > rho)[0]
+        if valid_indices.numel() == 0:
+            return torch.maximum(v, torch.zeros_like(v))
+            
+        rho_star = rho[valid_indices[-1]]
+        
+        return torch.maximum(v - rho_star, torch.zeros_like(v))
+    
 class TwoTimeScaleLagrangianOptimizer:
    def __init__(
        self,
@@ -629,7 +1007,8 @@ class TwoTimeScaleLagrangianOptimizer:
            if p.grad is not None:
                p.grad.zero_()
   
-   def step(self, loss_dict: Dict[str, torch.Tensor]):
+   def step(self):
+       """Fixed step method - no arguments needed"""
        # Update model parameters
        self.theta_optimizer.step()
       
@@ -678,9 +1057,6 @@ class TwoTimeScaleLagrangianOptimizer:
        rho = (cssv - 1) / torch.arange(1, len(v) + 1, device=v.device)
        rho_star = rho[torch.where(v_sorted > rho)[0][-1]]
        return torch.maximum(v - rho_star, torch.zeros_like(v))
-
-
-
 
 
 
@@ -916,8 +1292,6 @@ class NavierStokes1DDataset(Dataset):
 
 
 
-
-
 class Trainer:
    def __init__(
        self,
@@ -973,14 +1347,9 @@ class Trainer:
        u = batch['u'].to(self.device)
        regime_idx = batch['regime_idx'].to(self.device)
       
-       #print(f"Input x range: [{x.min():.4f}, {x.max():.4f}]")
-       #print(f"Input u range: [{u.min():.4f}, {u.max():.4f}]")
-          
-
-
        self.optimizer.zero_grad()
       
-       if isinstance(self.model, LagrangianExpertSystem):
+       if isinstance(self.model, (LagrangianExpertSystem, SingleTimeScaleLagrangianExpertSystem)):
            loss, metadata = self.model.compute_loss(x, u)
           
            if torch.isnan(loss):
@@ -992,23 +1361,44 @@ class Trainer:
           
            loss.backward()
           
-           if hasattr(self.optimizer, 'step'):
-               self.optimizer.step({
-                   'loss': loss,
-                   'g_lambda': metadata['g_lambda'],
-                   'h_lambda': metadata['h_lambda']
-               })
+           # Fixed: Call step without arguments
+           self.optimizer.step()
           
            metrics = {
                'loss': loss.item(),
-               'constraint_violation': metadata['g_lambda'].abs().item(),
+               'constraint_violation': metadata.get('g_lambda', torch.tensor(0.0)).abs().item(),
                'min_weight': metadata['weights'].min().item()
            }
           
            if 'huber_loss' in metadata:
                metrics['huber_loss'] = metadata['huber_loss']
+           elif 'recon_loss' in metadata:
+               metrics['huber_loss'] = metadata['recon_loss']
           
            return metrics
+          
+       elif isinstance(self.model, ADMMExpertSystem):
+           loss, metadata = self.model.compute_loss(x, u)
+          
+           if torch.isnan(loss):
+               return {
+                   'loss': float('nan'),
+                   'primal_residual': float('nan')
+               }
+          
+           loss.backward()
+           torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+           self.optimizer.step()
+           
+           # Update ADMM variables after optimizer step
+           self.model.update_admm_variables()
+          
+           return {
+               'loss': loss.item(),
+               'huber_loss': metadata['recon_loss'],
+               'primal_residual': metadata['primal_residual'],
+               'admm_loss': metadata['admm_loss']
+           }
           
        else:
            output, metadata = self.model(x)
@@ -1044,7 +1434,7 @@ class Trainer:
                regime_idx = batch['regime_idx'].to(self.device)
               
                try:
-                   if isinstance(self.model, LagrangianExpertSystem):
+                   if isinstance(self.model, (LagrangianExpertSystem, SingleTimeScaleLagrangianExpertSystem)):
                        output, metadata = self.model(x)
                        huber_loss = self.huber(output, u)
                        loss, loss_metadata = self.model.compute_loss(x, u)
@@ -1052,7 +1442,17 @@ class Trainer:
                        metrics = {
                            'loss': loss.item(),
                            'huber_loss': huber_loss.item(),
-                           'constraint_violation': loss_metadata['g_lambda'].abs().item()
+                           'constraint_violation': loss_metadata.get('g_lambda', torch.tensor(0.0)).abs().item()
+                       }
+                   elif isinstance(self.model, ADMMExpertSystem):
+                       output, metadata = self.model(x)
+                       huber_loss = self.huber(output, u)
+                       loss, loss_metadata = self.model.compute_loss(x, u)
+                      
+                       metrics = {
+                           'loss': loss.item(),
+                           'huber_loss': huber_loss.item(),
+                           'primal_residual': loss_metadata.get('primal_residual', 0.0)
                        }
                    else:
                        output, metadata = self.model(x)
@@ -1074,8 +1474,6 @@ class Trainer:
                    continue
       
        return {k: np.mean(v) for k, v in val_metrics.items()}
-
-
 
 
 
@@ -1202,88 +1600,26 @@ class LagrangianExpertSystem(nn.Module):
        return lagrangian, metadata
 
 
-# def plot_solver_outputs(
-#     model: LagrangianExpertSystem,
-#     dataset: PDEDataset,
-#     epoch: int,
-#     save_dir: str = 'plots'
-# ):
-#     """Plot individual solver outputs and combined solution"""
-#     os.makedirs(save_dir, exist_ok=True)
-#     model.eval()
-  
-#     fig, axes = plt.subplots(3, 2, figsize=(15, 20))
-  
-#     with torch.no_grad():
-#         # Get one example from each regime
-#         for regime in PhysicsRegime:
-#             regime_idx = list(PhysicsRegime).index(regime)
-          
-#             # Find first example of this regime
-#             for item in dataset:
-#                 if item['regime_idx'].item() == regime_idx:
-#                     x = item['x'].to(model.device).unsqueeze(0)
-#                     u = item['u']
-                  
-#                     # Get model outputs
-#                     combined, metadata = model(x, return_all=True)
-                  
-#                     # Plot in appropriate subplot
-#                     row = regime_idx // 2
-#                     col = regime_idx % 2
-                  
-#                     # Plot true solution
-#                     axes[row, col].plot(x[0].cpu(), u.cpu(),
-#                                       'k-', label='True', linewidth=2)
-                  
-#                     # Plot individual solver outputs
-#                     solver_outputs = metadata['solver_outputs'][0]  # [n_solvers, input_dim]
-#                     weights = metadata['weights']  # [n_solvers]
-                  
-#                     # Ensure weights is 1D
-#                     if weights.dim() > 1:
-#                         weights = weights.squeeze()
-                  
-#                     for i in range(len(solver_outputs)):
-#                         axes[row, col].plot(
-#                             x[0].cpu(),
-#                             solver_outputs[i].cpu(),
-#                             '--',
-#                             alpha=0.5,
-#                             label=f'Solver {i} (w={weights[i]:.2f})'
-#                         )
-                  
-#                     # Plot combined solution
-#                     axes[row, col].plot(x[0].cpu(), combined[0].cpu(),
-#                                       'r-', label='Combined', linewidth=2)
-                  
-#                     axes[row, col].set_title(f'{regime.value}')
-#                     axes[row, col].legend()
-#                     axes[row, col].grid(True)
-#                     break
-  
-#     plt.tight_layout()
-#     plt.savefig(f'{save_dir}/solver_outputs_epoch_{epoch}.png')
-#     plt.close()
-
-
 def plot_solver_outputs(
-   lagrangian_model: nn.Module,
-   softmax_model: nn.Module,
+   models: Dict[str, nn.Module],
    dataset: NavierStokes1DDataset,
    epoch: int,
    save_dir: str = 'plots',
    num_samples: int = 4
 ):
-   """Plot solver outputs comparing Lagrangian and Softmax approaches"""
+   """Plot solver outputs comparing all approaches"""
    os.makedirs(save_dir, exist_ok=True)
-   if hasattr(lagrangian_model, 'eval'):
-       lagrangian_model.eval()
-   if hasattr(softmax_model, 'eval'):
-       softmax_model.eval()
+   
+   for model_name, model in models.items():
+       if hasattr(model, 'eval'):
+           model.eval()
   
-   # Create figure with 2 columns (Lagrangian vs Softmax) and num_samples rows
-   fig, axes = plt.subplots(num_samples, 2, figsize=(20, 5*num_samples))
+   # Create figure with columns for each method and num_samples rows
+   n_methods = len(models)
+   fig, axes = plt.subplots(num_samples, n_methods, figsize=(5*n_methods, 5*num_samples))
+   
+   if num_samples == 1:
+       axes = axes.reshape(1, -1)
   
    # Color scheme
    colors = {
@@ -1303,16 +1639,13 @@ def plot_solver_outputs(
       
        for i, idx in enumerate(indices):
            sample = dataset[idx]
-           x = sample['x'].to(lagrangian_model.device).unsqueeze(0)
+           x = sample['x'].to(next(iter(models.values())).device).unsqueeze(0)
            u = sample['u']
           
-           # Process both models
-           for j, (model, title) in enumerate([
-               (lagrangian_model, 'Lagrangian'),
-               (softmax_model, 'Softmax')
-           ]):
+           # Process each model
+           for j, (model_name, model) in enumerate(models.items()):
                output, metadata = model(x, return_all=True)
-               ax = axes[i, j]
+               ax = axes[i, j] if n_methods > 1 else axes[i]
               
                # Plot initial condition
                ax.plot(x_coords, x[0].cpu(), '-',
@@ -1331,11 +1664,11 @@ def plot_solver_outputs(
                    if isinstance(weights, torch.Tensor):
                        weights = weights.detach().cpu()
                        if weights.dim() > 1:
-                           weights = weights.squeeze()
+                           weights = weights.mean(dim=0)  # Average over batch
                   
                    solver_names = ['FNO', 'WENO', 'Boundary', 'Multiscale']
                    for k, (solver_output, name) in enumerate(zip(solver_outputs, solver_names)):
-                       weight_value = weights[k].item() if isinstance(weights, torch.Tensor) else weights[k]
+                       weight_value = weights[k].item() if isinstance(weights, torch.Tensor) and len(weights) > k else 0.25
                        ax.plot(x_coords, solver_output.cpu(), '--',
                               color=colors[name], alpha=0.5,
                               label=f'{name} (w={weight_value:.2f})')
@@ -1354,18 +1687,16 @@ def plot_solver_outputs(
                    regime = metadata['regimes'][0]
                    regime_info = f" - Regime: {regime}"
               
-               ax.set_title(f'{title} - Sample {i+1}{regime_info}')
+               ax.set_title(f'{model_name} - Sample {i+1}{regime_info}')
                ax.set_xlabel('Spatial Position')
                ax.set_ylabel('Loss')
                ax.legend(loc='center left', bbox_to_anchor=(1, 0.5))
                ax.grid(True)
   
    plt.tight_layout()
-   plt.savefig(f'{save_dir}/comparison_outputs_epoch_{epoch}.png',
+   plt.savefig(f'{save_dir}/all_methods_outputs_epoch_{epoch}.png',
                bbox_inches='tight', dpi=300)
    plt.close()
-
-
 
 
 
@@ -1375,34 +1706,30 @@ def plot_training_metrics(
    epoch: int,
    save_dir: str = 'plots'
 ):
-   """Plot training metrics comparing Lagrangian and Softmax approaches"""
+   """Plot training metrics comparing all approaches"""
    os.makedirs(save_dir, exist_ok=True)
   
    fig, axes = plt.subplots(2, 2, figsize=(15, 15))
   
    # Color scheme for better visualization
    colors = {
-       'lagrangian': {
-           'train': 'royalblue',
-           'val': 'lightblue'
-       },
-       'softmax': {
-           'train': 'salmon',
-           'val': 'lightcoral'
-       }
+       'lagrangian': {'train': 'royalblue', 'val': 'lightblue'},
+       'softmax': {'train': 'salmon', 'val': 'lightcoral'},
+       'admm': {'train': 'green', 'val': 'lightgreen'},
+       'single_time_scale': {'train': 'purple', 'val': 'lavender'}
    }
   
    # Loss plot
    ax = axes[0, 0]
-   for model_type in ['lagrangian', 'softmax']:
+   for model_type in metrics.keys():
        if f'train_loss' in metrics[model_type]:
            ax.plot(metrics[model_type]['train_loss'],
                   label=f'{model_type.capitalize()} Train',
-                  color=colors[model_type]['train'],
+                  color=colors.get(model_type, {}).get('train', 'black'),
                   linestyle='-')
            ax.plot(metrics[model_type]['val_loss'],
                   label=f'{model_type.capitalize()} Val',
-                  color=colors[model_type]['val'],
+                  color=colors.get(model_type, {}).get('val', 'gray'),
                   linestyle='--')
    ax.set_title('Loss Comparison')
    ax.set_xlabel('Epoch')
@@ -1412,15 +1739,15 @@ def plot_training_metrics(
   
    # Huber Loss plot
    ax = axes[0, 1]
-   for model_type in ['lagrangian', 'softmax']:
+   for model_type in metrics.keys():
        if f'train_huber_loss' in metrics[model_type]:
            ax.plot(metrics[model_type]['train_huber_loss'],
                   label=f'{model_type.capitalize()} Train',
-                  color=colors[model_type]['train'],
+                  color=colors.get(model_type, {}).get('train', 'black'),
                   linestyle='-')
            ax.plot(metrics[model_type]['val_huber_loss'],
                   label=f'{model_type.capitalize()} Val',
-                  color=colors[model_type]['val'],
+                  color=colors.get(model_type, {}).get('val', 'gray'),
                   linestyle='--')
    ax.set_title('Huber Loss Comparison')
    ax.set_xlabel('Epoch')
@@ -1430,35 +1757,32 @@ def plot_training_metrics(
   
    # Constraint/Balance plot (log scale)
    ax = axes[1, 0]
-   if 'constraint_violation' in metrics['lagrangian']:
-       ax.semilogy(metrics['lagrangian']['constraint_violation'],
-                  label='Lagrangian Constraint',
-                  color=colors['lagrangian']['train'])
-   if 'balance_loss' in metrics['softmax']:
-       ax.semilogy(metrics['softmax']['balance_loss'],
-                  label='Softmax Balance',
-                  color=colors['softmax']['train'])
-   ax.set_title('Constraint/Balance Metrics')
+   for model_type in metrics.keys():
+       if 'constraint_violation' in metrics[model_type]:
+           ax.semilogy(metrics[model_type]['constraint_violation'],
+                      label=f'{model_type.capitalize()} Constraint',
+                      color=colors.get(model_type, {}).get('train', 'black'))
+       if 'primal_residual' in metrics[model_type]:
+           ax.semilogy(metrics[model_type]['primal_residual'],
+                      label=f'{model_type.capitalize()} ADMM Residual',
+                      color=colors.get(model_type, {}).get('train', 'black'),
+                      linestyle=':')
+   ax.set_title('Constraint/Residual Metrics')
    ax.set_xlabel('Epoch')
    ax.set_ylabel('Value (log scale)')
    ax.legend()
    ax.grid(True)
   
-   # Regime Accuracy plot (if available)
+   # Weight stability plot
    ax = axes[1, 1]
-   for model_type in ['lagrangian', 'softmax']:
-       if 'train_regime_accuracy' in metrics[model_type]:
-           ax.plot(metrics[model_type]['train_regime_accuracy'],
-                  label=f'{model_type.capitalize()} Train',
-                  color=colors[model_type]['train'],
-                  linestyle='-')
-           ax.plot(metrics[model_type]['val_regime_accuracy'],
-                  label=f'{model_type.capitalize()} Val',
-                  color=colors[model_type]['val'],
-                  linestyle='--')
-   ax.set_title('Regime Classification Accuracy')
+   for model_type in metrics.keys():
+       if 'min_weight' in metrics[model_type]:
+           ax.plot(metrics[model_type]['min_weight'],
+                  label=f'{model_type.capitalize()} Min Weight',
+                  color=colors.get(model_type, {}).get('train', 'black'))
+   ax.set_title('Minimum Weight Evolution')
    ax.set_xlabel('Epoch')
-   ax.set_ylabel('Accuracy')
+   ax.set_ylabel('Minimum Weight')
    ax.legend()
    ax.grid(True)
   
@@ -1469,11 +1793,9 @@ def plot_training_metrics(
                ha='left', va='bottom', fontsize=8)
   
    plt.tight_layout()
-   plt.savefig(f'{save_dir}/training_metrics_epoch_{epoch}.png',
+   plt.savefig(f'{save_dir}/all_methods_metrics_epoch_{epoch}.png',
                bbox_inches='tight', dpi=300)
    plt.close()
-
-
 
 
 
@@ -1497,18 +1819,10 @@ def main():
    # Create save directories
    os.makedirs(f'{cfg.save_dir}/lagrangian', exist_ok=True)
    os.makedirs(f'{cfg.save_dir}/softmax', exist_ok=True)
+   os.makedirs(f'{cfg.save_dir}/admm', exist_ok=True)
+   os.makedirs(f'{cfg.save_dir}/single_time_scale', exist_ok=True)
   
    # Create datasets
-   # train_dataset = PDEDataset(
-   #     n_samples=cfg.n_samples,
-   #     input_dim=cfg.input_dim
-   # )
-  
-   # val_dataset = PDEDataset(
-   #     n_samples=cfg.n_samples // 5,
-   #     input_dim=cfg.input_dim,
-   #     seed=43
-   # )
    train_dataset = NavierStokes1DDataset(
        n_samples=cfg.n_samples,
        input_dim=cfg.input_dim
@@ -1553,7 +1867,7 @@ def main():
            )
        ]
   
-   # Create models
+   # Create all models
    lagrangian_model = LagrangianExpertSystem(
        solvers=create_solvers(),
        input_dim=cfg.input_dim,
@@ -1569,91 +1883,95 @@ def main():
        temperature=cfg.temperature,
        device=cfg.device
    ).to(cfg.device)
+   
+   # New models
+   admm_model = ADMMExpertSystem(
+       solvers=create_solvers(),
+       input_dim=cfg.input_dim,
+       hidden_dim=cfg.hidden_dim,
+       rho=cfg.rho,
+       device=cfg.device
+   ).to(cfg.device)
+   
+   single_time_scale_model = SingleTimeScaleLagrangianExpertSystem(
+       solvers=create_solvers(),
+       input_dim=cfg.input_dim,
+       hidden_dim=cfg.hidden_dim,
+       rho=cfg.rho,
+       device=cfg.device
+   ).to(cfg.device)
   
-   # Initialize trainers
-   lagrangian_trainer = Trainer(
-       model=lagrangian_model,
-       train_loader=train_loader,
-       val_loader=val_loader,
-       learning_rate=cfg.lr
-   )
-  
-   softmax_trainer = Trainer(
-       model=softmax_model,
-       train_loader=train_loader,
-       val_loader=val_loader,
-       learning_rate=cfg.lr
-   )
+   # Initialize trainers for all models
+   models = {
+       'lagrangian': lagrangian_model,
+       'softmax': softmax_model,
+       'admm': admm_model,
+       'single_time_scale': single_time_scale_model
+   }
+   
+   trainers = {}
+   for name, model in models.items():
+       trainers[name] = Trainer(
+           model=model,
+           train_loader=train_loader,
+           val_loader=val_loader,
+           learning_rate=cfg.lr
+       )
   
    # Training loop
    metrics = {
        'lagrangian': defaultdict(list),
-       'softmax': defaultdict(list)
+       'softmax': defaultdict(list),
+       'admm': defaultdict(list),
+       'single_time_scale': defaultdict(list)
    }
    best_val_loss = {
        'lagrangian': float('inf'),
-       'softmax': float('inf')
+       'softmax': float('inf'),
+       'admm': float('inf'),
+       'single_time_scale': float('inf')
    }
   
    try:
        for epoch in range(cfg.n_epochs):
            print(f"\nEpoch {epoch+1}/{cfg.n_epochs}")
           
-           # Train both models
-           print("\nLagrangian System:")
-           train_metrics = lagrangian_trainer.train_epoch()
-           val_metrics = lagrangian_trainer.validate()
-          
-           for k, v in train_metrics.items():
-               print(f"Train {k}: {v:.4f}")
-               metrics['lagrangian'][f'train_{k}'].append(v)
-           for k, v in val_metrics.items():
-               print(f"Val {k}: {v:.4f}")
-               metrics['lagrangian'][f'val_{k}'].append(v)
-           print("\nSoftmax System:")
-           train_metrics = softmax_trainer.train_epoch()
-           val_metrics = softmax_trainer.validate()
-          
-           for k, v in train_metrics.items():
-               print(f"Train {k}: {v:.4f}")
-               metrics['softmax'][f'train_{k}'].append(v)
-           for k, v in val_metrics.items():
-               print(f"Val {k}: {v:.4f}")
-               metrics['softmax'][f'val_{k}'].append(v)
-           # Save best models
-           for model_type in ['lagrangian', 'softmax']:
-               if val_metrics['loss'] < best_val_loss[model_type]:
-                   best_val_loss[model_type] = val_metrics['loss']
-                   model = lagrangian_model if model_type == 'lagrangian' else softmax_model
+           # Train all models
+           for model_name, trainer in trainers.items():
+               print(f"\n{model_name.capitalize()} System:")
+               train_metrics = trainer.train_epoch()
+               val_metrics = trainer.validate()
+              
+               for k, v in train_metrics.items():
+                   print(f"Train {k}: {v}")
+                   metrics[model_name][f'train_{k}'].append(v)
+               for k, v in val_metrics.items():
+                   print(f"Val {k}: {v}")
+                   metrics[model_name][f'val_{k}'].append(v)
+                   
+               # Save best models
+               if val_metrics['loss'] < best_val_loss[model_name]:
+                   best_val_loss[model_name] = val_metrics['loss']
                    torch.save({
                        'epoch': epoch,
-                       'model_state_dict': model.state_dict(),
+                       'model_state_dict': models[model_name].state_dict(),
                        'val_loss': val_metrics['loss']
-                   }, f'{cfg.save_dir}/{model_type}/best_model.pth')
+                   }, f'{cfg.save_dir}/{model_name}/best_model.pth')
           
            # Plot results periodically
            if (epoch + 1) % 10 == 0:
                plot_solver_outputs(
-                   lagrangian_model=lagrangian_model,
-                   softmax_model=softmax_model,
-                   dataset=val_dataset,  # Make sure this is the actual dataset
+                   models=models,
+                   dataset=val_dataset,
                    epoch=epoch + 1,
                    save_dir=f'{cfg.save_dir}'
                )
-               # plot_solver_outputs(
-               #     softmax_model,
-               #     val_dataset,
-               #     epoch + 1,
-               #     f'{cfg.save_dir}/softmax'
-               # )
+               
                plot_training_metrics(
                    metrics,
+                   epoch + 1,
                    f'{cfg.save_dir}'
                )
-               # plot_training_metrics(
-               #     metrics,
-               #     f'{cfg.save_dir}/softmax'
-               # )
               
                # Plot comparison
                plot_comparison(
@@ -1667,12 +1985,11 @@ def main():
   
    finally:
        # Save final models and metrics
-       for model_type in ['lagrangian', 'softmax']:
-           model = lagrangian_model if model_type == 'lagrangian' else softmax_model
+       for model_name, model in models.items():
            torch.save({
                'model_state_dict': model.state_dict(),
-               'metrics': metrics[model_type]
-           }, f'{cfg.save_dir}/{model_type}/final_model.pth')
+               'metrics': metrics[model_name]
+           }, f'{cfg.save_dir}/{model_name}/final_model.pth')
       
        # Plot final results
        plot_comparison(metrics, cfg.n_epochs, cfg.save_dir)
@@ -1681,15 +1998,15 @@ def main():
 
 
 def plot_comparison(metrics: Dict, epoch: int, save_dir: str):
-   """Plot comparison between Lagrangian and Softmax approaches"""
+   """Plot comparison between all approaches"""
    fig, axes = plt.subplots(2, 2, figsize=(15, 15))
   
    # Training loss comparison
    if 'train_loss' in metrics['lagrangian']:
-       axes[0, 0].plot(metrics['lagrangian']['train_loss'],
-                       label='Lagrangian', color='blue')
-       axes[0, 0].plot(metrics['softmax']['train_loss'],
-                       label='Softmax', color='red')
+       for model_type in metrics.keys():
+           if 'train_loss' in metrics[model_type]:
+               axes[0, 0].plot(metrics[model_type]['train_loss'],
+                              label=model_type.capitalize())
        axes[0, 0].set_title('Training Loss Comparison')
        axes[0, 0].set_xlabel('Epoch')
        axes[0, 0].set_ylabel('Loss')
@@ -1698,10 +2015,10 @@ def plot_comparison(metrics: Dict, epoch: int, save_dir: str):
   
    # Validation loss comparison
    if 'val_loss' in metrics['lagrangian']:
-       axes[0, 1].plot(metrics['lagrangian']['val_loss'],
-                       label='Lagrangian', color='blue')
-       axes[0, 1].plot(metrics['softmax']['val_loss'],
-                       label='Softmax', color='red')
+       for model_type in metrics.keys():
+           if 'val_loss' in metrics[model_type]:
+               axes[0, 1].plot(metrics[model_type]['val_loss'],
+                              label=model_type.capitalize())
        axes[0, 1].set_title('Validation Loss Comparison')
        axes[0, 1].set_xlabel('Epoch')
        axes[0, 1].set_ylabel('Loss')
@@ -1709,43 +2026,40 @@ def plot_comparison(metrics: Dict, epoch: int, save_dir: str):
        axes[0, 1].grid(True)
   
    # Weight evolution
-   if 'weights_mean' in metrics['lagrangian']:
-       axes[1, 0].plot(metrics['lagrangian']['weights_mean'],
-                      label='Lagrangian Mean', color='blue')
-       axes[1, 0].plot(metrics['softmax']['weights_mean'],
-                      label='Softmax Mean', color='red')
-       axes[1, 0].set_title('Weight Evolution')
+   if 'min_weight' in metrics['lagrangian']:
+       for model_type in metrics.keys():
+           if 'min_weight' in metrics[model_type]:
+               axes[1, 0].plot(metrics[model_type]['min_weight'],
+                              label=model_type.capitalize())
+       axes[1, 0].set_title('Minimum Weight Evolution')
        axes[1, 0].set_xlabel('Epoch')
-       axes[1, 0].set_ylabel('Weight Value')
+       axes[1, 0].set_ylabel('Minimum Weight')
        axes[1, 0].legend()
        axes[1, 0].grid(True)
   
-   # Constraint violation / Balance loss
-   if 'constraint_violation' in metrics['lagrangian']:
-       axes[1, 1].semilogy(metrics['lagrangian']['constraint_violation'],
-                          label='Lagrangian Constraint', color='blue')
-   if 'balance_loss' in metrics['softmax']:
-       axes[1, 1].semilogy(metrics['softmax']['balance_loss'],
-                          label='Softmax Balance', color='red')
-   if 'constraint_violation' in metrics['lagrangian'] or 'balance_loss' in metrics['softmax']:
-       axes[1, 1].set_title('Constraint/Balance Metrics')
-       axes[1, 1].set_xlabel('Epoch')
-       axes[1, 1].set_ylabel('Value (log scale)')
-       axes[1, 1].legend()
-       axes[1, 1].grid(True)
+   # Constraint violation / ADMM residual
+   ax = axes[1, 1]
+   for model_type in metrics.keys():
+       if 'constraint_violation' in metrics[model_type]:
+           ax.semilogy(metrics[model_type]['constraint_violation'],
+                      label=f'{model_type.capitalize()} Constraint')
+       if 'primal_residual' in metrics[model_type]:
+           ax.semilogy(metrics[model_type]['primal_residual'],
+                      label=f'{model_type.capitalize()} ADMM Residual',
+                      linestyle='--')
+   if 'constraint_violation' in metrics['lagrangian'] or 'primal_residual' in metrics['admm']:
+       ax.set_title('Constraint/Residual Metrics')
+       ax.set_xlabel('Epoch')
+       ax.set_ylabel('Value (log scale)')
+       ax.legend()
+       ax.grid(True)
   
    plt.tight_layout()
-   plt.savefig(f'{save_dir}/comparison_epoch_{epoch}.png')
+   plt.savefig(f'{save_dir}/all_methods_comparison_epoch_{epoch}.png')
    plt.close()
-
-
 
 
 
 
 if __name__ == "__main__":
    main()
-
-
-
-
