@@ -11,6 +11,8 @@ import copy
 import os
 import json
 import warnings
+import pickle
+
 warnings.filterwarnings('ignore')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -918,6 +920,9 @@ class ADMMCombiner(nn.Module):
         
         # Parameter for soft consensus (instead of strict averaging)
         self.consensus_weight = nn.Parameter(torch.ones(1))
+        
+        # Store the final weights for analysis
+        self.last_scale_weights = None
     
     def forward(self, multiscale_predictions: Dict[int, torch.Tensor],
                 input_grid: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
@@ -962,6 +967,9 @@ class ADMMCombiner(nn.Module):
         
         scale_outputs = {}
         
+        # Store the contribution of each scale to z at each iteration
+        scale_contributions = {scale: [] for scale in compatible_predictions.keys()}
+        
         # ADMM iterations
         for iter_idx in range(self.num_iter):
             # 1. x-update (local variable update for each scale)
@@ -978,7 +986,9 @@ class ADMMCombiner(nn.Module):
                 
                 for scale, x_i in x.items():
                     if scale in u:
-                        z_numerator = z_numerator + x_i + u[scale]
+                        contribution = x_i + u[scale]
+                        z_numerator = z_numerator + contribution
+                        scale_contributions[scale].append(contribution)
                         count += 1
                 
                 if count > 0:
@@ -995,6 +1005,30 @@ class ADMMCombiner(nn.Module):
         # Refine consensus
         z_refined = self.consensus_refiner(z)
         
+        # Compute the final weight of each scale based on contribution to consensus
+        # We'll compute the norm of each scale's contribution relative to total
+        final_contributions = {}
+        for scale in compatible_predictions.keys():
+            if scale_contributions[scale]:
+                # Use the last contribution
+                last_contribution = scale_contributions[scale][-1]
+                # Compute Frobenius norm of the contribution
+                contrib_norm = torch.norm(last_contribution, p='fro', dim=(-2, -1)).mean()
+                final_contributions[scale] = contrib_norm
+        
+        # Convert to softmax weights
+        if final_contributions:
+            contribution_tensor = torch.stack([final_contributions[scale] for scale in sorted(final_contributions.keys())])
+            scale_weights = F.softmax(contribution_tensor, dim=0)
+            
+            # Map back to scale indices
+            self.last_scale_weights = {
+                scale: weight.item() 
+                for scale, weight in zip(sorted(final_contributions.keys()), scale_weights)
+            }
+        else:
+            self.last_scale_weights = {scale: 1.0/len(self.scales) for scale in self.scales}
+        
         # Store metadata
         self.last_dual_vars = {scale: u[scale].detach().clone() 
                               for scale in u if scale in self.scales}
@@ -1006,8 +1040,10 @@ class ADMMCombiner(nn.Module):
             'compatible_predictions': compatible_predictions,
             'rho': rho,
             'log_rho': self.log_rho,
-            'consensus_weight': self.consensus_weight
+            'consensus_weight': self.consensus_weight,
+            'scale_weights': self.last_scale_weights  
         }
+    
     
 
 class SingleScaleFNO(nn.Module):
@@ -1225,15 +1261,15 @@ class StableMultiscaleTrainer:
         )
         
         self.scheduler = torch.optim.lr_scheduler.OneCycleLR(
-            self.optimizer,
-            max_lr=lr,
-            epochs=100,
-            steps_per_epoch=len(train_loader),
-            pct_start=0.3,
-            anneal_strategy='cos',
-            div_factor=25.0,
-            final_div_factor=1000.0
-        )
+                self.optimizer,
+                max_lr=self.optimizer.param_groups[0]['lr'],
+                epochs=500,  # Use num_epochs parameter
+                steps_per_epoch=len(self.train_loader),
+                pct_start=0.3,
+                anneal_strategy='cos',
+                div_factor=25.0,
+                final_div_factor=1000.0
+            )
         
         self.grad_clip = grad_clip
         self.best_val_loss = float('inf')
@@ -1271,40 +1307,6 @@ class StableMultiscaleTrainer:
             lambda_weights = lambdas / np.sum(lambdas)
             weights_to_log['lambda'] = lambda_weights
             
-        # elif self.method == 'lagrangian_two':
-        #     # Dual variables from softmax (already sum to 1)
-        #     if hasattr(combiner, 'dual_logits'):
-        #         lambda_weights = F.softmax(combiner.dual_logits, dim=0).detach().cpu().numpy()
-        #         weights_to_log['lambda'] = lambda_weights
-            
-        elif self.method == 'admm':
-            # For ADMM, check if we have last_dual_vars
-            if hasattr(combiner, 'last_dual_vars') and combiner.last_dual_vars:
-                # Extract mean magnitude of dual variables for each scale
-                lambda_weights = []
-                scales_with_vars = sorted(combiner.last_dual_vars.keys())
-                
-                for scale in self.model_scales:
-                    if scale in combiner.last_dual_vars:
-                        dual_var = combiner.last_dual_vars[scale]
-                        weight = torch.mean(torch.abs(dual_var)).item()
-                        lambda_weights.append(weight)
-                    else:
-                        # If scale not in dual_vars, use 0
-                        lambda_weights.append(0.0)
-                
-                if lambda_weights and sum(lambda_weights) > 0:
-                    # Normalize to sum to 1
-                    lambda_weights = np.array(lambda_weights)
-                    lambda_weights = lambda_weights / np.sum(lambda_weights)
-                    weights_to_log['lambda'] = lambda_weights
-                else:
-                    # Fallback: use equal weights
-                    weights_to_log['lambda'] = np.ones(len(self.model_scales)) / len(self.model_scales)
-            else:
-                # Fallback: use equal weights
-                weights_to_log['lambda'] = np.ones(len(self.model_scales)) / len(self.model_scales)
-                    
         elif self.method == 'softmax':
             # For softmax, we need to store router weights during forward pass
             if hasattr(combiner, 'last_router_weights') and combiner.last_router_weights is not None:
@@ -1316,8 +1318,32 @@ class StableMultiscaleTrainer:
                 # Fallback: use equal weights
                 weights_to_log['lambda'] = np.ones(len(self.model_scales)) / len(self.model_scales)
         
+        elif self.method == 'admm':
+            # For ADMM, use the computed scale weights
+            if hasattr(combiner, 'last_scale_weights') and combiner.last_scale_weights:
+                # Map to the correct order of scales
+                lambda_weights = []
+                for scale in self.model_scales:
+                    if scale in combiner.last_scale_weights:
+                        lambda_weights.append(combiner.last_scale_weights[scale])
+                    else:
+                        lambda_weights.append(0.0)
+                
+                if lambda_weights and sum(lambda_weights) > 0:
+                    # Ensure they sum to 1
+                    lambda_weights = np.array(lambda_weights)
+                    lambda_weights = lambda_weights / np.sum(lambda_weights)
+                    weights_to_log['lambda'] = lambda_weights
+                else:
+                    # Fallback: use equal weights
+                    weights_to_log['lambda'] = np.ones(len(self.model_scales)) / len(self.model_scales)
+            else:
+                # Fallback: use equal weights
+                weights_to_log['lambda'] = np.ones(len(self.model_scales)) / len(self.model_scales)
+        
         if weights_to_log:
             self.history['combiner_weights'].append(weights_to_log)
+
             
     def train_epoch(self) -> float:
         self.model.train()
@@ -1427,7 +1453,7 @@ class StableMultiscaleTrainer:
         
         return avg_val_loss, self.val_loss_ema
     
-    def train(self, num_epochs: int = 100, verbose: bool = True):
+    def train(self, num_epochs: int = 10, verbose: bool = True):
         best_val_loss = float('inf')
         patience_counter = 0
         
@@ -1632,7 +1658,7 @@ class StableMultiscalePDEsolver(nn.Module):
         
         scale_predictions = {}
         
-        # Get predictions for each scale with gradient checkpointing for stability
+        # Get predictions for each scale
         for scale in self.scales:
             input_key = f'grid_{scale}'
             if input_key in multiscale_inputs:
@@ -1644,22 +1670,44 @@ class StableMultiscalePDEsolver(nn.Module):
             target_size = max(self.scales)
             device = next(self.parameters()).device
             return torch.zeros(1, self.out_channels, target_size, target_size, 
-                             device=device), {'scale_predictions': {}}
+                            device=device), {'scale_predictions': {}}
         
-        # Use largest input for combiner
+        # Determine the target scale for output (use largest available input scale)
         available_scales_in_input = [int(k.split('_')[1]) for k in multiscale_inputs.keys()]
-        largest_input_scale = max(available_scales_in_input)
-        largest_grid_key = f'grid_{largest_input_scale}'
-        largest_grid = multiscale_inputs[largest_grid_key]
+        target_scale = max(available_scales_in_input)
+        
+        # Ensure all predictions are at the target scale by upsampling
+        upsampled_predictions = {}
+        for scale, pred in scale_predictions.items():
+            if pred.shape[-1] != target_scale:
+                upsampled_pred = F.interpolate(pred, size=(target_scale, target_scale), 
+                                            mode='bilinear', align_corners=False)
+                upsampled_predictions[scale] = upsampled_pred
+            else:
+                upsampled_predictions[scale] = pred
+        
+        # Use grid at target scale for combiner
+        target_grid_key = f'grid_{target_scale}'
+        if target_grid_key in multiscale_inputs:
+            target_grid = multiscale_inputs[target_grid_key]
+        else:
+            # Fallback to largest available grid
+            largest_grid_key = f'grid_{max(available_scales_in_input)}'
+            target_grid = multiscale_inputs[largest_grid_key]
         
         # Combine predictions
-        combined, meta = self.combiner(scale_predictions, largest_grid)
+        combined, meta = self.combiner(upsampled_predictions, target_grid)
+        
+        # Store original and upsampled predictions in metadata
         meta['scale_predictions'] = scale_predictions
+        meta['upsampled_predictions'] = upsampled_predictions
+        meta['target_scale'] = target_scale
         
         # Refine output with residual connection
         refined = self.fine_tune(combined)
-        output = self.skip_weight * refined + (1 - self.skip_weight) * combined
-        output = self.final_proj(output) + output  # Residual
+        output = refined + combined  # Residual connection
+        #output = self.skip_weight * refined + (1 - self.skip_weight) * combined
+        #output = self.final_proj(output) + output  # Residual
         
         meta['final_output'] = output
         
@@ -1843,7 +1891,7 @@ def stable_multiscale_comparison():
         
         # Train
         try:
-            history = trainer.train(num_epochs=10, verbose=True)
+            history = trainer.train(num_epochs=500, verbose=True)
             
             # Test on evaluation set (includes unseen scales)
             model.eval()
@@ -2339,9 +2387,9 @@ def plot_method_comparison_summary(results: Dict, train_scales: List[int]):
 
 
 def plot_weight_evolution(results: Dict, train_scales: List[int]):
-    """Plot the evolution of lambda weights during training"""
+    """Plot the evolution of combination weights (scale mixing weights) during training"""
     
-    # Filter out single_scale_baseline since it doesn't have lambda weights
+    # Filter out single_scale_baseline since it doesn't have combination weights
     successful_methods = {k: v for k, v in results.items() 
                          if v.get('success', False) and k != 'single_scale_baseline'}
     
@@ -2369,32 +2417,52 @@ def plot_weight_evolution(results: Dict, train_scales: List[int]):
         if 'combiner_weights' in history and history['combiner_weights']:
             weights_history = history['combiner_weights']
             
-            # Extract lambda weights over epochs
-            lambda_weights_history = []
+            # Extract combination weights (normalized, should sum to 1)
+            combination_weights_history = []
             for epoch_weights in weights_history:
                 if 'lambda' in epoch_weights:
-                    lambda_weights = epoch_weights['lambda']
-                    if lambda_weights is not None:
-                        lambda_weights_history.append(lambda_weights)
+                    combo_weights = epoch_weights['lambda']
+                    if combo_weights is not None:
+                        # Ensure weights are properly normalized
+                        if isinstance(combo_weights, np.ndarray):
+                            if len(combo_weights.shape) == 1:  # [num_scales]
+                                combination_weights_history.append(combo_weights)
+                            elif len(combo_weights.shape) == 2:  # [batch, num_scales]
+                                # Average over batch dimension
+                                combination_weights_history.append(np.mean(combo_weights, axis=0))
+                        else:
+                            # Convert to numpy array
+                            combo_np = np.array(combo_weights)
+                            if len(combo_np.shape) == 1:
+                                combination_weights_history.append(combo_np)
             
-            if lambda_weights_history:
-                lambda_weights_arr = np.array(lambda_weights_history)
+            if combination_weights_history:
+                combo_weights_arr = np.array(combination_weights_history)
                 
-                # Plot each lambda weight evolution
-                for i in range(lambda_weights_arr.shape[1]):
-                    label = f'Scale {train_scales[i]}' if i < len(train_scales) else f'λ{i}'
-                    ax.plot(range(len(lambda_weights_arr)), lambda_weights_arr[:, i], 
+                # Plot each scale's combination weight evolution
+                for i in range(combo_weights_arr.shape[1]):
+                    label = f'Scale {train_scales[i]}' if i < len(train_scales) else f'Scale {i+1}'
+                    ax.plot(range(len(combo_weights_arr)), combo_weights_arr[:, i], 
                            label=label, marker='o', markersize=3, linewidth=1.5)
                 
                 ax.set_xlabel('Epoch')
-                ax.set_ylabel('Lambda Weight')
-                ax.set_title(f'{method.upper()}: Lambda Weights Evolution')
+                ax.set_ylabel('Combination Weight')
+                
+                # Method-specific titles
+                method_titles = {
+                    'softmax': 'Softmax Router Weights Evolution',
+                    'lagrangian_single': 'Lagrangian Weights Evolution',
+                    'lagrangian_two': 'Lagrangian Two-Scale Weights Evolution',
+                    'admm': 'ADMM Scale Contribution Weights Evolution'
+                }
+                ax.set_title(f'{method.upper()}: {method_titles.get(method, "Weight Evolution")}')
                 ax.legend(fontsize=9, loc='best')
                 ax.grid(True, alpha=0.3)
                 
-                # Add annotation for final values
-                if len(lambda_weights_arr) > 0:
-                    final_weights = lambda_weights_arr[-1]
+                # Add important annotations
+                if len(combo_weights_arr) > 0:
+                    final_weights = combo_weights_arr[-1]
+                    
                     # Check if weights sum to approximately 1
                     weight_sum = np.sum(final_weights)
                     ax.text(0.02, 0.98, f'Sum: {weight_sum:.3f}',
@@ -2402,14 +2470,36 @@ def plot_weight_evolution(results: Dict, train_scales: List[int]):
                            verticalalignment='top',
                            bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
                     
+                    # Display final weights in a box
+                    final_text = "Final Weights:\n"
                     for i, weight in enumerate(final_weights):
-                        ax.text(0.02, 0.90 - i*0.05, f'S{i+1}: {weight:.3f}',
+                        scale_label = f'S{train_scales[i]}' if i < len(train_scales) else f'S{i+1}'
+                        final_text += f'{scale_label}: {weight:.3f}\n'
+                    
+                    ax.text(0.02, 0.70, final_text,
+                           transform=ax.transAxes, fontsize=8,
+                           verticalalignment='top',
+                           bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.5))
+                    
+                    # Check for weight stability/convergence
+                    if len(combo_weights_arr) > 10:
+                        # Calculate variance in last 5 epochs
+                        last_5 = combo_weights_arr[-5:]
+                        variance = np.var(last_5, axis=0).mean()
+                        ax.text(0.02, 0.40, f'Stability (var): {variance:.5f}',
                                transform=ax.transAxes, fontsize=8,
                                verticalalignment='top',
-                               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+                               bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
+            
             else:
-                ax.text(0.5, 0.5, 'No lambda weights data', 
-                       ha='center', va='center', transform=ax.transAxes)
+                # Try to extract weights differently for ADMM
+                if method == 'admm':
+                    # For ADMM, we might need to compute weights from dual variables
+                    ax.text(0.5, 0.5, 'Computing ADMM combination weights...', 
+                           ha='center', va='center', transform=ax.transAxes)
+                else:
+                    ax.text(0.5, 0.5, 'No combination weight data', 
+                           ha='center', va='center', transform=ax.transAxes)
                 ax.set_title(f'{method.upper()}')
         else:
             ax.text(0.5, 0.5, 'No weight evolution data', 
@@ -2420,12 +2510,114 @@ def plot_weight_evolution(results: Dict, train_scales: List[int]):
     for idx in range(len(successful_methods), len(axes)):
         axes[idx].axis('off')
     
-    plt.suptitle('Lambda Weight Evolution During Training (Excluding Single Scale Baseline)', fontsize=16, y=1.02)
+    plt.suptitle('Scale Combination Weight Evolution During Training', fontsize=16, y=1.02)
     plt.tight_layout()
-    plt.savefig('lambda_weight_evolution.png', dpi=300, bbox_inches='tight')
+    plt.savefig('combination_weight_evolution.png', dpi=300, bbox_inches='tight')
     plt.show()
     
-    print(f"\nLambda weight evolution plot saved to 'lambda_weight_evolution.png'")
+    # Create a combined plot showing all methods together for comparison
+    plt.figure(figsize=(12, 8))
+    
+    colors = plt.cm.tab10(np.linspace(0, 1, len(train_scales)))
+    
+    for method_idx, (method, result) in enumerate(successful_methods.items()):
+        plt.subplot(2, 2, method_idx + 1)
+        history = result['history']
+        
+        if 'combiner_weights' in history and history['combiner_weights']:
+            weights_history = history['combiner_weights']
+            combination_weights_history = []
+            
+            for epoch_weights in weights_history:
+                if 'lambda' in epoch_weights:
+                    combo_weights = epoch_weights['lambda']
+                    if combo_weights is not None:
+                        if isinstance(combo_weights, np.ndarray):
+                            if len(combo_weights.shape) == 1:
+                                combination_weights_history.append(combo_weights)
+                            elif len(combo_weights.shape) == 2:
+                                combination_weights_history.append(np.mean(combo_weights, axis=0))
+            
+            if combination_weights_history:
+                combo_weights_arr = np.array(combination_weights_history)
+                
+                for i in range(combo_weights_arr.shape[1]):
+                    label = f'Scale {train_scales[i]}' if i < len(train_scales) else f'Scale {i+1}'
+                    plt.plot(range(len(combo_weights_arr)), combo_weights_arr[:, i], 
+                            color=colors[i], label=label, linewidth=2)
+                
+                # Method names for titles
+                method_names = {
+                    'softmax': 'Softmax Router',
+                    'lagrangian_single': 'Lagrangian (Single)',
+                    'lagrangian_two': 'Lagrangian (Two-scale)',
+                    'admm': 'ADMM'
+                }
+                
+                plt.title(f'{method_names.get(method, method)}')
+                plt.xlabel('Epoch')
+                plt.ylabel('Weight')
+                plt.grid(True, alpha=0.3)
+                
+                # Only show legend in first plot
+                if method_idx == 0:
+                    plt.legend(fontsize=8, loc='best')
+    
+    plt.suptitle('Comparison of Scale Combination Weight Evolution Across Methods', fontsize=16, y=1.02)
+    plt.tight_layout()
+    plt.savefig('comparison_weight_evolution_grid.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    # Create a summary plot of final weights
+    plt.figure(figsize=(10, 6))
+    
+    x = np.arange(len(train_scales))
+    width = 0.8 / len(successful_methods)
+    
+    method_names = {
+        'softmax': 'Softmax',
+        'lagrangian_single': 'Lagrangian S',
+        'lagrangian_two': 'Lagrangian T',
+        'admm': 'ADMM'
+    }
+    
+    colors = plt.cm.Set2(np.linspace(0, 1, len(successful_methods)))
+    
+    for idx, (method, result) in enumerate(successful_methods.items()):
+        history = result['history']
+        if 'combiner_weights' in history and history['combiner_weights']:
+            last_weights = history['combiner_weights'][-1].get('lambda', None)
+            if last_weights is not None:
+                if isinstance(last_weights, np.ndarray):
+                    if len(last_weights.shape) == 2:  # [batch, num_scales]
+                        last_weights = np.mean(last_weights, axis=0)
+                    
+                    offset = (idx - len(successful_methods)/2 + 0.5) * width
+                    bars = plt.bar(x + offset, last_weights, width=width, 
+                                   label=method_names.get(method, method), 
+                                   color=colors[idx], alpha=0.8)
+                    
+                    # Add value labels on top of bars
+                    for bar, weight in zip(bars, last_weights):
+                        height = bar.get_height()
+                        plt.text(bar.get_x() + bar.get_width()/2., height,
+                                f'{weight:.3f}', ha='center', va='bottom', fontsize=8)
+    
+    plt.xlabel('Scale')
+    plt.ylabel('Final Weight')
+    plt.title('Final Scale Combination Weights Comparison')
+    plt.xticks(x, [f'{s}x{s}' for s in train_scales])
+    plt.legend()
+    plt.grid(True, alpha=0.3, axis='y')
+    plt.tight_layout()
+    plt.savefig('final_combination_weights.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    print(f"\nCombination weight evolution plots saved:")
+    print(f"  - 'combination_weight_evolution.png'")
+    print(f"  - 'comparison_weight_evolution_grid.png'")
+    print(f"  - 'final_combination_weights.png'")
+
 
 if __name__ == "__main__":
     print("=" * 80)
@@ -2486,7 +2678,11 @@ if __name__ == "__main__":
             
             # Plot weight evolution during training
             plot_weight_evolution(results, train_scales)
-            #plot_loss_evolution(results)
+
+            with open("results/stable_multiscale_results.pkl", "wb") as f:
+                pickle.dump(results, f)
+                print("\nResults saved to 'results/stable_multiscale_results.pkl'   ")
+            # plot_loss_evolution(results)
             
         else:
             print("No methods successfully trained!")
