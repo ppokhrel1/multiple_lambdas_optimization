@@ -1318,28 +1318,28 @@ def train_comparative_expert_routing_with_weights():
             routing_method='softmax',
             n_experts=4,
             input_dim=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         ),
         'lagrangian_single': EnhancedExpertRoutingSystem(
             routing_method='lagrangian_single',
             n_experts=4,
             input_dim=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         ),
         'lagrangian_two': EnhancedExpertRoutingSystem(
             routing_method='lagrangian_two',
             n_experts=4,
             input_dim=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         ),
         'admm': EnhancedExpertRoutingSystem(
             routing_method='admm',
             n_experts=4,
             input_dim=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         )
     }

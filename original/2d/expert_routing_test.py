@@ -1431,28 +1431,28 @@ def train_comparative_expert_routing_2d_with_weights():
             routing_method='softmax',
             n_experts=4,
             grid_size=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         ),
         'lagrangian_single_2d': EnhancedExpertRoutingSystem2D(
             routing_method='lagrangian_single',
             n_experts=4,
             grid_size=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         ),
         'lagrangian_two_2d': EnhancedExpertRoutingSystem2D(
             routing_method='lagrangian_two',
             n_experts=4,
             grid_size=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         ),
         'admm_2d': EnhancedExpertRoutingSystem2D(
             routing_method='admm',
             n_experts=4,
             grid_size=grid_size,
-            hidden_dim=128,
+            hidden_dim=256,
             device=device
         )
     }
