@@ -629,6 +629,7 @@ class LagrangianSingleTimeRouter(BaseRouter):
         ind = torch.arange(1, logits.shape[-1] + 1, device=logits.device)
         cond = u - (cssv - 1.0) / ind > 0
         rho = torch.sum(cond, dim=-1, keepdim=True)
+        rho = torch.clamp(rho, min=1)
         
         # Compute theta
         theta = (torch.gather(cssv, -1, rho - 1) - 1.0) / rho
