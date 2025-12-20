@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import matplotlib.pyplot as plt
 from scipy import ndimage
 from torch.utils.data import Dataset, DataLoader
 from typing import Tuple, List, Dict, Optional, Any
@@ -991,17 +990,111 @@ class EnhancedExpertRoutingSystem2D(nn.Module):
         
         return total_loss, metrics
 
-# ==================== Comparative Trainer 2D (Enhanced) ====================
+# ==================== Weight Tracking Class for 2D ====================
 
-class ExpertRoutingComparativeTrainer2D:
-    """Enhanced trainer for comparing 2D routing methods"""
+class WeightTracker2D:
+    """Track and analyze expert weights over training for 2D models"""
+    
+    def __init__(self, n_experts: int = 4, expert_names: List[str] = None):
+        self.n_experts = n_experts
+        self.expert_names = expert_names or [f'Expert_{i}' for i in range(n_experts)]
+        
+        # Storage for weight statistics
+        self.epoch_weights = []  # List of weight arrays per epoch
+        self.weight_means = []   # Mean weights per expert per epoch
+        self.weight_stds = []    # Std of weights per expert per epoch
+        self.weight_entropies = []  # Entropy of weight distribution per epoch
+        
+        # Specialization metrics
+        self.dominant_expert_counts = []  # Count of times each expert is dominant
+        self.weight_sparsity = []  # How sparse are the weight distributions
+        
+        # Per-regime statistics (if available)
+        self.regime_weights = defaultdict(list)
+    
+    def update(self, weights: torch.Tensor, regimes: Optional[List[str]] = None):
+        """Update tracker with new batch of weights"""
+        weights_np = weights.detach().cpu().numpy()
+        
+        # Store epoch weights
+        self.epoch_weights.append(weights_np)
+        
+        # Compute statistics
+        batch_mean = weights_np.mean(axis=0)  # Mean per expert across batch
+        batch_std = weights_np.std(axis=0)    # Std per expert across batch
+        
+        self.weight_means.append(batch_mean)
+        self.weight_stds.append(batch_std)
+        
+        # Compute entropy (measure of confidence/specialization)
+        # Higher entropy = more uniform = less confident/specialized
+        batch_entropy = -np.sum(batch_mean * np.log(batch_mean + 1e-10))
+        self.weight_entropies.append(batch_entropy)
+        
+        # Compute sparsity (percentage of weights below threshold)
+        sparsity_threshold = 0.2  # Consider weights below this as "inactive"
+        sparsity = np.mean(weights_np < sparsity_threshold)
+        self.weight_sparsity.append(sparsity)
+        
+        # Track dominant expert
+        dominant_experts = np.argmax(weights_np, axis=1)
+        expert_counts = np.bincount(dominant_experts, minlength=self.n_experts)
+        self.dominant_expert_counts.append(expert_counts)
+        
+        # Track per-regime weights if regimes provided
+        if regimes is not None:
+            for i, regime in enumerate(regimes):
+                if i < len(weights_np):
+                    self.regime_weights[regime].append(weights_np[i])
+    
+    def get_summary(self, epoch: int) -> Dict[str, Any]:
+        """Get summary statistics for current epoch"""
+        if not self.weight_means:
+            return {}
+        
+        current_means = self.weight_means[-1]
+        current_stds = self.weight_stds[-1]
+        
+        # Find most and least used experts
+        most_used_idx = np.argmax(current_means)
+        least_used_idx = np.argmin(current_means)
+        
+        # Specialization score (0-1, higher = more specialized)
+        # Based on how concentrated weights are
+        max_weight = np.max(current_means)
+        min_weight = np.min(current_means)
+        specialization = (max_weight - min_weight) / (max_weight + 1e-10)
+        
+        return {
+            'epoch': epoch,
+            'expert_means': dict(zip(self.expert_names, current_means)),
+            'expert_stds': dict(zip(self.expert_names, current_stds)),
+            'entropy': self.weight_entropies[-1],
+            'sparsity': self.weight_sparsity[-1],
+            'specialization': specialization,
+            'most_used_expert': {
+                'name': self.expert_names[most_used_idx],
+                'weight': current_means[most_used_idx],
+                'confidence': 1.0 - current_stds[most_used_idx] / (current_means[most_used_idx] + 1e-10)
+            },
+            'least_used_expert': {
+                'name': self.expert_names[least_used_idx],
+                'weight': current_means[least_used_idx]
+            },
+            'dominant_counts': dict(zip(self.expert_names, self.dominant_expert_counts[-1]))
+        }
+
+# ==================== Enhanced Comparative Trainer with Weight Tracking (2D) ====================
+
+class EnhancedExpertRoutingComparativeTrainer2D:
+    """Enhanced trainer for comparing 2D routing methods with weight tracking"""
     
     def __init__(self, models: Dict[str, nn.Module], learning_rates: Dict[str, float],
                  device: str = 'cuda' if torch.cuda.is_available() else 'cpu'):
         self.device = device
         self.models = {name: model.to(device) for name, model in models.items()}
         
-        # Method labels and colors for visualization
+        # Method labels
         self.method_labels = {
             'fno_2d': '2D FNO Baseline',
             'softmax_2d': '2D Softmax Routing',
@@ -1010,13 +1103,16 @@ class ExpertRoutingComparativeTrainer2D:
             'admm_2d': '2D ADMM Routing'
         }
         
-        self.method_colors = {
-            'fno_2d': 'gray',
-            'softmax_2d': 'blue',
-            'lagrangian_single_2d': 'green',
-            'lagrangian_two_2d': 'red',
-            'admm_2d': 'purple'
-        }
+        # Initialize weight trackers for routing methods
+        self.weight_trackers = {}
+        expert_names = ['Fourier', 'Spectral', 'FiniteDiff', 'Neural']
+        
+        for name, model in self.models.items():
+            if name != 'fno_2d':
+                self.weight_trackers[name] = WeightTracker2D(
+                    n_experts=model.n_experts,
+                    expert_names=expert_names[:model.n_experts]
+                )
         
         # Initialize optimizers and schedulers
         self.optimizers = {}
@@ -1058,6 +1154,7 @@ class ExpertRoutingComparativeTrainer2D:
         u0 = batch['u0'].to(self.device)
         u_solution = batch['u_solution'].to(self.device)
         u_noisy = batch['u_noisy'].to(self.device)
+        regimes = batch.get('regime', None)
         
         all_metrics = {}
         
@@ -1067,14 +1164,14 @@ class ExpertRoutingComparativeTrainer2D:
             if name == 'fno_2d':
                 # FNO baseline
                 self.optimizers[name].zero_grad()
-                predictions = model(u0)
+                predictions = model(u_noisy)
                 
                 # Compute losses
                 recon_loss = huber_loss(predictions, u_solution).mean()
                 
                 # Physics loss
                 dx = 2.0 / model.grid_size
-                physics_loss = model.compute_physics_loss(predictions, u0, nu=0.01, dx=dx)
+                physics_loss = model.compute_physics_loss(predictions, u_noisy, nu=0.01, dx=dx)
                 
                 total_loss = recon_loss + 0.001 * physics_loss
                 total_loss.backward()
@@ -1095,9 +1192,9 @@ class ExpertRoutingComparativeTrainer2D:
                     self.optimizers[f'{name}_theta'].zero_grad()
                     self.optimizers[f'{name}_lambda'].zero_grad()
                     
-                    predictions, metadata = model(u0)
+                    predictions, metadata = model(u_noisy)
                     total_loss, metrics = model.compute_loss(
-                        predictions, u_solution, u0, metadata
+                        predictions, u_solution, u_noisy, metadata
                     )
                     
                     total_loss.backward()
@@ -1113,14 +1210,36 @@ class ExpertRoutingComparativeTrainer2D:
                     # Single-scale optimization
                     self.optimizers[name].zero_grad()
                     
-                    predictions, metadata = model(u0)
+                    predictions, metadata = model(u_noisy)
                     total_loss, metrics = model.compute_loss(
-                        predictions, u_solution, u0, metadata
+                        predictions, u_solution, u_noisy, metadata
                     )
                     
                     total_loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     self.optimizers[name].step()
+                
+                # Track weights and confidence
+                if 'weights' in metadata:
+                    weights = metadata['weights']
+                    self.weight_trackers[name].update(weights, regimes)
+                    
+                    # Add weight statistics to metrics
+                    weight_mean = weights.mean(dim=0).detach().numpy()
+                    weight_std = weights.std(dim=0).detach().numpy()
+                    
+                    for i in range(model.n_experts):
+                        metrics[f'weight_exp_{i}_mean'] = float(weight_mean[i])
+                        metrics[f'weight_exp_{i}_std'] = float(weight_std[i])
+                    
+                    # Compute confidence metrics
+                    weight_entropy = -torch.sum(weights.mean(dim=0) * torch.log(weights.mean(dim=0) + 1e-10))
+                    weight_sparsity = torch.mean((weights < 0.2).float())
+                    
+                    metrics['weight_entropy'] = weight_entropy.item()
+                    metrics['weight_sparsity'] = weight_sparsity.item()
+                    metrics['weight_max'] = weights.max().item()
+                    metrics['weight_min'] = weights.min().item()
                 
                 all_metrics[name] = metrics
         
@@ -1162,30 +1281,36 @@ class ExpertRoutingComparativeTrainer2D:
                 u0 = batch['u0'].to(self.device)
                 u_solution = batch['u_solution'].to(self.device)
                 u_noisy = batch['u_noisy'].to(self.device)
+                regimes = batch.get('regime', None)
                 
                 for name, model in self.models.items():
                     if name == 'fno_2d':
-                        predictions = model(u0)
+                        predictions = model(u_noisy)
                         recon_loss = huber_loss(predictions, u_solution).mean()
-                        physics_loss = torch.tensor(0.0)
                         
                         val_metrics[name]['loss'].append(recon_loss.item())
                         val_metrics[name]['recon_loss'].append(recon_loss.item())
                         
                     else:
-                        predictions, metadata = model(u0)
+                        predictions, metadata = model(u_noisy)
                         total_loss, metrics = model.compute_loss(
-                            predictions, u_solution, u0, metadata
+                            predictions, u_solution, u_noisy, metadata
                         )
                         
                         for k, v in metrics.items():
                             val_metrics[name][k].append(v)
                     
                     # Additional validation metrics
-                    if name != 'fno_2d':
-                        weights = metadata.get('weights', torch.zeros(model.n_experts))
+                    if name != 'fno_2d' and 'weights' in metadata:
+                        weights = metadata['weights']
                         weight_entropy = -torch.sum(weights.mean(dim=0) * torch.log(weights.mean(dim=0) + 1e-10))
                         val_metrics[name]['weight_entropy'].append(weight_entropy.item())
+                        
+                        # Expert utilization
+                        dominant_expert = torch.argmax(weights, dim=1)
+                        for i in range(model.n_experts):
+                            utilization = torch.mean((dominant_expert == i).float())
+                            val_metrics[name][f'utilization_exp_{i}'].append(utilization.item())
         
         # Average and store
         result_metrics = {}
@@ -1210,207 +1335,51 @@ class ExpertRoutingComparativeTrainer2D:
                 loss_value = val_losses.get(base_name, {}).get('loss', 1.0)
             
             scheduler.step()
-
-# ==================== Visualization Functions 2D ====================
-
-def plot_comparative_results_2d(trainer: ExpertRoutingComparativeTrainer2D,
-                              dataset: EnhancedBurgersDataset2D,
-                              epoch: int,
-                              save_dir: str = 'expert_routing_2d_results'):
-    """Plot comprehensive comparison of all 2D methods"""
-    os.makedirs(save_dir, exist_ok=True)
     
-    fig = plt.figure(figsize=(20, 15))
-    
-    # 1. Training Loss Comparison
-    ax1 = plt.subplot(3, 3, 1)
-    for name in trainer.models.keys():
-        if 'loss' in trainer.metrics[name]:
-            ax1.plot(trainer.metrics[name]['loss'],
-                    label=trainer.method_labels[name],
-                    color=trainer.method_colors[name])
-    ax1.set_title('Training Loss')
-    ax1.set_xlabel('Epoch')
-    ax1.set_ylabel('Loss')
-    ax1.legend()
-    ax1.grid(True, alpha=0.3)
-    
-    # 2. Reconstruction Loss
-    ax2 = plt.subplot(3, 3, 2)
-    for name in trainer.models.keys():
-        if 'recon_loss' in trainer.metrics[name]:
-            ax2.plot(trainer.metrics[name]['recon_loss'],
-                    label=trainer.method_labels[name],
-                    color=trainer.method_colors[name])
-    ax2.set_title('Reconstruction Loss')
-    ax2.set_xlabel('Epoch')
-    ax2.set_ylabel('Loss')
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
-    
-    # 3. Physics Loss
-    ax3 = plt.subplot(3, 3, 3)
-    for name in trainer.models.keys():
-        if 'physics_loss' in trainer.metrics[name]:
-            ax3.plot(trainer.metrics[name]['physics_loss'],
-                    label=trainer.method_labels[name],
-                    color=trainer.method_colors[name])
-    ax3.set_title('Physics Loss')
-    ax3.set_xlabel('Epoch')
-    ax3.set_ylabel('Loss')
-    ax3.legend()
-    ax3.grid(True, alpha=0.3)
-    
-    # 4. Weight Statistics
-    ax4 = plt.subplot(3, 3, 4)
-    for name in trainer.models.keys():
-        if name != 'fno_2d' and 'weights_mean' in trainer.metrics[name]:
-            ax4.plot(trainer.metrics[name]['weights_mean'],
-                    label=trainer.method_labels[name],
-                    color=trainer.method_colors[name])
-    ax4.set_title('Average Expert Weight')
-    ax4.set_xlabel('Epoch')
-    ax4.set_ylabel('Mean Weight')
-    ax4.legend()
-    ax4.grid(True, alpha=0.3)
-    
-    # 5. Expert Weight Distribution
-    ax5 = plt.subplot(3, 3, 5)
-    expert_names = ['Fourier', 'Spectral', 'Finite Diff', 'Neural']
-    
-    # Get a sample and compute weights
-    sample_idx = np.random.randint(len(dataset))
-    sample = dataset[sample_idx]
-    u0 = sample['u0'].unsqueeze(0).to(trainer.device)
-    
-    with torch.no_grad():
-        for name, model in trainer.models.items():
-            if name != 'fno_2d':
-                model.eval()
-                _, metadata = model(u0)
-                weights = metadata['weights'].cpu().numpy()[0]
-                
-                x_pos = np.arange(len(weights))
-                offset = list(trainer.models.keys()).index(name) * 0.2 - 0.3
-                ax5.bar(x_pos + offset, weights, width=0.15,
-                       label=trainer.method_labels[name],
-                       color=trainer.method_colors[name],
-                       alpha=0.7)
-    
-    ax5.set_title('Expert Weight Distribution')
-    ax5.set_xlabel('Expert Type')
-    ax5.set_ylabel('Weight')
-    ax5.set_xticks(np.arange(len(expert_names)))
-    ax5.set_xticklabels(expert_names)
-    ax5.legend()
-    ax5.grid(True, alpha=0.3)
-    
-    # 6-9. Velocity Field Visualizations
-    with torch.no_grad():
-        for i, name in enumerate(['fno_2d', 'softmax_2d', 'lagrangian_two_2d', 'admm_2d']):
-            if name not in trainer.models:
+    def print_weight_summary(self, epoch: int):
+        """Print detailed weight and confidence summary"""
+        print("\n" + "="*60)
+        print(f"2D EXPERT WEIGHTS AND CONFIDENCE - Epoch {epoch}")
+        print("="*60)
+        
+        for name, tracker in self.weight_trackers.items():
+            summary = tracker.get_summary(epoch)
+            if not summary:
                 continue
-                
-            ax = plt.subplot(3, 3, 6 + i)
-            model = trainer.models[name]
-            model.eval()
             
-            if name == 'fno_2d':
-                predictions = model(u0)
-            else:
-                predictions, _ = model(u0)
+            print(f"\n{self.method_labels[name]} ({name}):")
+            print("-" * 40)
             
-            # Plot vorticity
-            u_pred = predictions[0, 0].cpu().numpy()
-            v_pred = predictions[0, 1].cpu().numpy()
+            # Print expert weights
+            print("Expert Weights (mean ± std):")
+            for exp_name, mean in summary['expert_means'].items():
+                std = summary['expert_stds'][exp_name]
+                confidence = 1.0 - (std / (mean + 1e-10))
+                print(f"  {exp_name:12s}: {mean:.4f} ± {std:.4f} (conf: {confidence:.3f})")
             
-            # Compute vorticity
-            uy, ux = np.gradient(u_pred, dataset.dy, dataset.dx)
-            vy, vx = np.gradient(v_pred, dataset.dy, dataset.dx)
-            vorticity = vx - uy
+            # Print confidence metrics
+            print(f"\nConfidence Metrics:")
+            print(f"  Entropy:          {summary['entropy']:.4f}")
+            print(f"  Sparsity:         {summary['sparsity']:.4f}")
+            print(f"  Specialization:   {summary['specialization']:.4f}")
             
-            im = ax.imshow(vorticity, cmap='RdBu_r', origin='lower',
-                          extent=[-1, 1, -1, 1], aspect='auto')
-            ax.set_title(f'{trainer.method_labels[name]} Vorticity')
-            plt.colorbar(im, ax=ax)
-    
-    plt.suptitle(f'2D Expert Routing Methods Comparison - Epoch {epoch}', fontsize=16)
-    plt.tight_layout()
-    plt.savefig(f'{save_dir}/comparison_epoch_{epoch}.png', dpi=150, bbox_inches='tight')
-    plt.close()
-    gc.collect()
-
-def analyze_vorticity_spectrum(trainer: ExpertRoutingComparativeTrainer2D,
-                             dataset: EnhancedBurgersDataset2D,
-                             num_samples: int = 10,
-                             save_dir: str = 'expert_routing_2d_results'):
-    """Analyze vorticity spectrum of different methods"""
-    for model in trainer.models.values():
-        model.eval()
-    
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    axes = axes.flatten()
-    
-    with torch.no_grad():
-        for idx, (name, model) in enumerate(trainer.models.items()):
-            if idx >= len(axes):
-                break
-                
-            ax = axes[idx]
-            all_spectra = []
+            # Print dominant expert
+            print(f"\nMost Used Expert:")
+            print(f"  {summary['most_used_expert']['name']}: "
+                  f"weight={summary['most_used_expert']['weight']:.4f}, "
+                  f"confidence={summary['most_used_expert']['confidence']:.3f}")
             
-            for _ in range(num_samples):
-                sample_idx = np.random.randint(len(dataset))
-                sample = dataset[sample_idx]
-                u0 = sample['u0'].unsqueeze(0).to(trainer.device)
-                
-                if name == 'fno_2d':
-                    predictions = model(u0)
-                else:
-                    predictions, _ = model(u0)
-                
-                # Compute vorticity
-                u_pred = predictions[0, 0].cpu().numpy()
-                v_pred = predictions[0, 1].cpu().numpy()
-                uy, ux = np.gradient(u_pred, dataset.dy, dataset.dx)
-                vy, vx = np.gradient(v_pred, dataset.dy, dataset.dx)
-                vorticity = vx - uy
-                
-                # Compute power spectrum
-                vorticity_fft = np.fft.fft2(vorticity)
-                power_spectrum = np.abs(np.fft.fftshift(vorticity_fft))**2
-                
-                # Radial average
-                center = np.array(power_spectrum.shape) // 2
-                y, x = np.indices(power_spectrum.shape)
-                r = np.sqrt((x - center[1])**2 + (y - center[0])**2)
-                r = r.astype(int)
-                
-                tbin = np.bincount(r.ravel(), power_spectrum.ravel())
-                nr = np.bincount(r.ravel())
-                radial_profile = tbin / (nr + 1e-10)
-                all_spectra.append(radial_profile[:center[0]])
-            
-            # Plot average spectrum
-            avg_spectrum = np.mean(all_spectra, axis=0)
-            k = np.arange(len(avg_spectrum))
-            
-            ax.loglog(k[1:], avg_spectrum[1:], label=trainer.method_labels[name],
-                     color=trainer.method_colors[name])
-            ax.set_xlabel('Wavenumber k')
-            ax.set_ylabel('Power Spectrum')
-            ax.set_title(f'{trainer.method_labels[name]} Vorticity Spectrum')
-            ax.grid(True, alpha=0.3)
-            ax.legend()
-    
-    plt.tight_layout()
-    plt.savefig(f'{save_dir}/vorticity_spectrum.png', dpi=150, bbox_inches='tight')
-    plt.close()
+            # Print dominant counts
+            print(f"\nDominant Expert Counts:")
+            for exp_name, count in summary['dominant_counts'].items():
+                print(f"  {exp_name:12s}: {count}")
+        
+        print("\n" + "="*60)
 
 # ==================== Main Training Function 2D ====================
 
-def train_comparative_expert_routing_2d():
-    """Main training function for 2D comparative expert routing"""
+def train_comparative_expert_routing_2d_with_weights():
+    """Main training function for 2D comparative expert routing with weight tracking"""
     # Set random seeds
     torch.manual_seed(42)
     np.random.seed(42)
@@ -1425,7 +1394,7 @@ def train_comparative_expert_routing_2d():
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print("="*60)
-    print("2D EXPERT ROUTING COMPARISON")
+    print("2D EXPERT ROUTING WITH WEIGHT TRACKING")
     print("="*60)
     print(f"Device: {device}")
     print(f"Grid size: {grid_size}x{grid_size}")
@@ -1499,7 +1468,7 @@ def train_comparative_expert_routing_2d():
     }
     
     # Create trainer
-    trainer = ExpertRoutingComparativeTrainer2D(
+    trainer = EnhancedExpertRoutingComparativeTrainer2D(
         models=models,
         learning_rates=learning_rates,
         device=device
@@ -1518,15 +1487,19 @@ def train_comparative_expert_routing_2d():
         # Validate
         val_metrics = trainer.validate(val_loader)
         
-        # Print progress
-        print(f"\nEpoch {epoch+1}/{n_epochs}")
-        print("-" * 40)
+        # Print progress with weights
+        trainer.print_weight_summary(epoch + 1)
         
+        # Print metrics
+        print(f"\nEpoch {epoch+1}/{n_epochs} Performance:")
+        print("-" * 50)
         for name in models.keys():
             print(f"{trainer.method_labels[name]:30s} | "
                   f"Train Loss: {train_metrics[name].get('loss', 0):.4e} | "
                   f"Val Loss: {val_metrics[name].get('loss', 0):.4e} | "
-                  f"Physics: {train_metrics[name].get('physics_loss', 0):.4e}")
+                  f"Physics: {train_metrics[name].get('physics_loss', 0):.4e} | "
+                  f"Train Recon Loss: {train_metrics[name].get('recon_loss'):.4e} | "
+                  f"Val Recon Loss: {val_metrics[name].get('recon_loss'):.4e}")
         
         # Update schedulers
         trainer.update_schedulers(val_metrics)
@@ -1535,29 +1508,39 @@ def train_comparative_expert_routing_2d():
         for name in models.keys():
             if val_metrics[name].get('loss', float('inf')) < best_val_loss[name]:
                 best_val_loss[name] = val_metrics[name]['loss']
-                torch.save({
+                checkpoint = {
                     'model_state': trainer.models[name].state_dict(),
                     'val_loss': best_val_loss[name],
                     'epoch': epoch,
                     'metrics': trainer.metrics[name]
-                }, f'expert_routing_2d_results/best_{name}_model.pth')
+                }
+                
+                # Add weight tracker data for routing methods
+                if name != 'fno_2d' and name in trainer.weight_trackers:
+                    checkpoint['weight_tracker'] = {
+                        'weight_means': trainer.weight_trackers[name].weight_means,
+                        'weight_entropies': trainer.weight_trackers[name].weight_entropies,
+                        'weight_sparsity': trainer.weight_trackers[name].weight_sparsity
+                    }
+                
+                torch.save(checkpoint, f'expert_routing_2d_results/best_{name}_model.pth')
         
-        # Plot every 20 epochs
-        if (epoch + 1) % 20 == 0:
-            plot_comparative_results_2d(trainer, dataset, epoch + 1)
-            print(f"Saved visualization for epoch {epoch + 1}")
+        # Print epoch summary
+        print(f"\nEpoch {epoch+1} completed.")
+        print(f"Best validation losses so far:")
+        for name in models.keys():
+            print(f"  {trainer.method_labels[name]}: {best_val_loss[name]:.4e}")
     
-    # Final evaluation
+    # Final evaluation and summary
     print("\n" + "="*60)
-    print("FINAL RESULTS")
+    print("2D FINAL RESULTS AND WEIGHT ANALYSIS")
     print("="*60)
     
     # Load best models and evaluate
     for name in models.keys():
-        # Load best model
-        checkpoint = torch.load(f'expert_routing_results/best_{name}_model.pth', 
-            map_location=device, 
-            weights_only=False)  # Add this
+        checkpoint = torch.load(f'expert_routing_2d_results/best_{name}_model.pth', 
+                               map_location=device,
+                               weights_only=False)
         trainer.models[name].load_state_dict(checkpoint['model_state'])
         
         # Final validation
@@ -1579,29 +1562,198 @@ def train_comparative_expert_routing_2d():
                 val_losses.append(loss.item())
         
         avg_val_loss = np.mean(val_losses)
-        print(f"{trainer.method_labels[name]:30s} | "
-              f"Best Val Loss: {checkpoint['val_loss']:.4e} | "
-              f"Final Val Loss: {avg_val_loss:.4e}")
+        print(f"\n{trainer.method_labels[name]:30s}:")
+        print(f"  Best Val Loss: {checkpoint['val_loss']:.4e}")
+        print(f"  Final Val Loss: {avg_val_loss:.4e}")
+        
+        # Print final weight statistics for routing methods
+        if name != 'fno_2d' and name in trainer.weight_trackers:
+            tracker = trainer.weight_trackers[name]
+            summary = tracker.get_summary(n_epochs)
+            if summary:
+                print(f"  Final Expert Weights:")
+                for exp_name, mean in summary['expert_means'].items():
+                    std = summary['expert_stds'][exp_name]
+                    confidence = 1.0 - (std / (mean + 1e-10))
+                    print(f"    {exp_name}: {mean:.4f} ± {std:.4f} (conf: {confidence:.3f})")
+                print(f"  Final Entropy: {summary['entropy']:.4f}")
+                print(f"  Final Specialization: {summary['specialization']:.4f}")
     
-    # Save final metrics
+    # Save comprehensive results
     final_results = {
         'metrics': trainer.metrics,
         'val_metrics': trainer.val_metrics,
-        'best_val_loss': best_val_loss
+        'best_val_loss': best_val_loss,
+        'weight_trackers': {}
     }
     
-    torch.save(final_results, 'expert_routing_2d_results/final_results.pth')
+    # Save weight tracker data
+    for name, tracker in trainer.weight_trackers.items():
+        final_results['weight_trackers'][name] = {
+            'weight_means': tracker.weight_means,
+            'weight_stds': tracker.weight_stds,
+            'weight_entropies': tracker.weight_entropies,
+            'weight_sparsity': tracker.weight_sparsity,
+            'dominant_expert_counts': tracker.dominant_expert_counts,
+            'expert_names': tracker.expert_names
+        }
     
-    # Create final comparison plot
-    plot_comparative_results_2d(trainer, dataset, n_epochs)
-    analyze_vorticity_spectrum(trainer, dataset)
+    torch.save(final_results, 'expert_routing_2d_results/final_results_detailed.pth')
+    
+    # Print comprehensive weight analysis
+    print("\n" + "="*60)
+    print("2D COMPREHENSIVE WEIGHT ANALYSIS")
+    print("="*60)
+    
+    for name in ['softmax_2d', 'lagrangian_single_2d', 'lagrangian_two_2d', 'admm_2d']:
+        if name in trainer.weight_trackers:
+            tracker = trainer.weight_trackers[name]
+            summary = tracker.get_summary(n_epochs)
+            if summary:
+                print(f"\n{name.upper()} Routing Method:")
+                print("-" * 40)
+                
+                # Weight evolution from first to last epoch
+                if len(tracker.weight_means) > 1:
+                    first_means = tracker.weight_means[0]
+                    last_means = tracker.weight_means[-1]
+                    
+                    print(f"  Weight Evolution (Epoch 1 → Epoch {n_epochs}):")
+                    for i, exp_name in enumerate(tracker.expert_names):
+                        change = last_means[i] - first_means[i]
+                        percent_change = (change / (first_means[i] + 1e-10)) * 100
+                        print(f"    {exp_name:12s}: {first_means[i]:.4f} → {last_means[i]:.4f} "
+                              f"({change:+.4f}, {percent_change:+.1f}%)")
+                
+                # Specialization analysis
+                print(f"\n  Specialization Metrics:")
+                print(f"    Entropy (final): {summary['entropy']:.4f}")
+                print(f"    Sparsity (final): {summary['sparsity']:.4f}")
+                print(f"    Specialization Score: {summary['specialization']:.4f}")
+                
+                # Most used expert
+                print(f"\n  Most Used Expert:")
+                print(f"    {summary['most_used_expert']['name']} "
+                      f"(weight: {summary['most_used_expert']['weight']:.4f}, "
+                      f"confidence: {summary['most_used_expert']['confidence']:.3f})")
     
     print("\n" + "="*60)
     print("2D Training completed successfully!")
     print("Results saved in 'expert_routing_2d_results/' directory")
     print("="*60)
     
-    return trainer
+    return trainer, final_results
+
+# ==================== Weight Analysis Functions for 2D ====================
+
+def analyze_saved_weights_2d(checkpoint_path: str):
+    """Analyze weight evolution from saved 2D checkpoint"""
+    results = torch.load(checkpoint_path, map_location='cpu')
+    
+    if 'weight_trackers' not in results:
+        print("No weight tracker data found in checkpoint")
+        return results
+    
+    print("="*60)
+    print("2D WEIGHT EVOLUTION ANALYSIS")
+    print("="*60)
+    
+    for method_name, tracker_data in results['weight_trackers'].items():
+        print(f"\nMethod: {method_name}")
+        print("-" * 40)
+        
+        weight_means = tracker_data['weight_means']
+        weight_entropies = tracker_data['weight_entropies']
+        expert_names = tracker_data.get('expert_names', [f'Expert_{i}' for i in range(len(weight_means[0]))])
+        
+        if not weight_means:
+            continue
+        
+        # Analyze trend
+        initial_means = np.array(weight_means[0])
+        final_means = np.array(weight_means[-1])
+        
+        print(f"Expert Weights Evolution:")
+        for i in range(len(initial_means)):
+            diff = final_means[i] - initial_means[i]
+            trend = "↑" if diff > 0.1 else "↓" if diff < -0.1 else "→"
+            print(f"  {expert_names[i]}: {initial_means[i]:.3f} → {final_means[i]:.3f} {trend}")
+        
+        # Entropy analysis
+        initial_entropy = weight_entropies[0]
+        final_entropy = weight_entropies[-1]
+        entropy_change = final_entropy - initial_entropy
+        
+        print(f"\nEntropy Analysis:")
+        print(f"  Initial: {initial_entropy:.3f}")
+        print(f"  Final:   {final_entropy:.3f}")
+        print(f"  Change:  {entropy_change:+.3f}")
+        
+        if entropy_change < -0.1:
+            print("  → Entropy decreased: More specialized!")
+        elif entropy_change > 0.1:
+            print("  → Entropy increased: More balanced!")
+        else:
+            print("  → Entropy stable: Consistent behavior")
+        
+        # Dominant expert analysis
+        if 'dominant_expert_counts' in tracker_data and tracker_data['dominant_expert_counts']:
+            initial_counts = tracker_data['dominant_expert_counts'][0]
+            final_counts = tracker_data['dominant_expert_counts'][-1]
+            
+            print(f"\nDominant Expert Analysis:")
+            print(f"  Initial distribution: {initial_counts}")
+            print(f"  Final distribution:   {final_counts}")
+            
+            if len(final_counts) > 0:
+                dominant_idx = np.argmax(final_counts)
+                print(f"  Most dominant expert: {expert_names[dominant_idx]} ({final_counts[dominant_idx]} samples)")
+    
+    return results
+
+def print_weight_history_2d(results, method_name: str, expert_idx: Optional[int] = None):
+    """Print detailed weight history for a specific 2D method"""
+    if 'weight_trackers' not in results or method_name not in results['weight_trackers']:
+        print(f"No weight data found for method: {method_name}")
+        return
+    
+    tracker_data = results['weight_trackers'][method_name]
+    weight_means = tracker_data['weight_means']
+    weight_stds = tracker_data['weight_stds']
+    expert_names = tracker_data.get('expert_names', [f'Expert_{i}' for i in range(len(weight_means[0]))])
+    
+    print(f"\n{'='*60}")
+    print(f"2D WEIGHT HISTORY FOR {method_name.upper()}")
+    print(f"{'='*60}")
+    
+    if expert_idx is not None:
+        # Print history for specific expert
+        print(f"\nExpert: {expert_names[expert_idx]}")
+        print("-" * 40)
+        for epoch, means in enumerate(weight_means):
+            if epoch % 10 == 0:  # Print every 10 epochs
+                std = weight_stds[epoch][expert_idx]
+                confidence = 1.0 - (std / (means[expert_idx] + 1e-10))
+                print(f"Epoch {epoch:3d}: {means[expert_idx]:.4f} ± {std:.4f} (conf: {confidence:.3f})")
+    else:
+        # Print summary for all experts
+        print("\nFinal Weights:")
+        print("-" * 40)
+        for i, name in enumerate(expert_names):
+            final_mean = weight_means[-1][i]
+            final_std = weight_stds[-1][i]
+            confidence = 1.0 - (final_std / (final_mean + 1e-10))
+            print(f"{name:12s}: {final_mean:.4f} ± {final_std:.4f} (conf: {confidence:.3f})")
+        
+        # Print evolution
+        print(f"\nWeight Evolution (Epoch 0 → {len(weight_means)-1}):")
+        print("-" * 40)
+        for i, name in enumerate(expert_names):
+            initial = weight_means[0][i]
+            final = weight_means[-1][i]
+            change = final - initial
+            pct_change = (change / (initial + 1e-10)) * 100
+            print(f"{name:12s}: {initial:.4f} → {final:.4f} ({change:+.4f}, {pct_change:+.1f}%)")
 
 # ==================== Main Execution ====================
 
@@ -1609,5 +1761,72 @@ if __name__ == "__main__":
     # Create results directory
     os.makedirs('expert_routing_2d_results', exist_ok=True)
     
-    # Run training
-    trainer = train_comparative_expert_routing_2d()
+    # Run training with weight tracking
+    trainer, final_results = train_comparative_expert_routing_2d_with_weights()
+    
+    # After training, analyze the weights
+    print("\n" + "="*60)
+    print("POST-TRAINING 2D WEIGHT ANALYSIS")
+    print("="*60)
+    
+    # Analyze saved results
+    if os.path.exists('expert_routing_2d_results/final_results_detailed.pth'):
+        results = analyze_saved_weights_2d('expert_routing_2d_results/final_results_detailed.pth')
+        
+        # Print detailed weight histories
+        for method in ['softmax_2d', 'lagrangian_single_2d', 'lagrangian_two_2d', 'admm_2d']:
+            print_weight_history_2d(results, method)
+        
+        # Compare methods
+        print(f"\n{'='*60}")
+        print("2D METHOD COMPARISON SUMMARY")
+        print(f"{'='*60}")
+        
+        routing_methods = ['softmax_2d', 'lagrangian_single_2d', 'lagrangian_two_2d', 'admm_2d']
+        for method in routing_methods:
+            if method in results['weight_trackers']:
+                tracker_data = results['weight_trackers'][method]
+                weight_means = tracker_data['weight_means']
+                weight_entropies = tracker_data['weight_entropies']
+                
+                if weight_means:
+                    final_means = weight_means[-1]
+                    specialization = (np.max(final_means) - np.min(final_means)) / (np.max(final_means) + 1e-10)
+                    
+                    print(f"\n{method.upper()}:")
+                    print(f"  Final Entropy: {weight_entropies[-1]:.4f}")
+                    print(f"  Specialization: {specialization:.4f}")
+                    print(f"  Most Used Expert: {np.argmax(final_means)} ({final_means[np.argmax(final_means)]:.4f})")
+    
+    # Print final summary
+    print("\n" + "="*60)
+    print("2D FINAL TRAINING SUMMARY")
+    print("="*60)
+    
+    # Print best validation losses
+    print("\nBest Validation Losses Across All 2D Methods:")
+    print("-" * 40)
+    
+    # Get best performance for each method
+    for name in trainer.models.keys():
+        if name in trainer.metrics and 'loss' in trainer.metrics[name]:
+            best_train_loss = min(trainer.metrics[name]['loss'])
+            best_val_loss = min(trainer.val_metrics[name].get('loss', [float('inf')]))
+            
+            print(f"{trainer.method_labels[name]:30s}:")
+            print(f"  Best Train Loss: {best_train_loss:.4e}")
+            print(f"  Best Val Loss:   {best_val_loss:.4e}")
+            
+            if name in ['softmax_2d', 'lagrangian_single_2d', 'lagrangian_two_2d', 'admm_2d']:
+                # Print weight statistics for routing methods
+                print(f"  Final Weight Distribution:")
+                if name in trainer.weight_trackers:
+                    tracker = trainer.weight_trackers[name]
+                    if tracker.weight_means:
+                        final_weights = tracker.weight_means[-1]
+                        for i, exp_name in enumerate(tracker.expert_names):
+                            print(f"    {exp_name}: {final_weights[i]:.4f}")
+    
+    print("\n" + "="*60)
+    print("2D Expert Routing Training Complete!")
+    print("="*60)
