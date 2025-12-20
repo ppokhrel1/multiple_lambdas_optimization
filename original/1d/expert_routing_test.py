@@ -550,7 +550,7 @@ class SoftmaxRouter(BaseRouter):
     """Softmax-based expert routing with temperature scaling"""
     
     def __init__(self, n_experts: int = 4, input_dim: int = 256, hidden_dim: int = 128,
-                 temperature: float = 2.0, entropy_weight: float = 0.01):
+                 temperature: float = 2.0, entropy_weight: float = 0.5):
         super().__init__(n_experts, input_dim, hidden_dim)
         self.temperature = temperature
         self.entropy_weight = entropy_weight
@@ -788,7 +788,7 @@ class EnhancedExpertRoutingSystem(nn.Module):
     
     def __init__(self, routing_method: str = 'softmax', n_experts: int = 4,
                  input_dim: int = 256, hidden_dim: int = 128, dropout_rate: float = 0.1,
-                 physics_weight: float = 0.01, entropy_weight: float = 0.001,  # Changed weights
+                 physics_weight: float = 0.01, entropy_weight: float = 0.5,  # Changed weights
                  constraint_weight: float = 0.01, device: str = 'cpu'):  # Changed constraint weight
         super().__init__()
         self.routing_method = routing_method
@@ -1112,8 +1112,8 @@ class EnhancedExpertRoutingComparativeTrainer:
                     self.weight_trackers[name].update(weights, regimes)
                     
                     # Add weight statistics to metrics
-                    weight_mean = weights.mean(dim=0).detach().numpy()
-                    weight_std = weights.std(dim=0).detach().numpy()
+                    weight_mean = weights.mean(dim=0).detach().cpu().numpy()
+                    weight_std = weights.std(dim=0).detach().cpu().numpy()
                     
                     for i in range(model.n_experts):
                         metrics[f'weight_exp_{i}_mean'] = float(weight_mean[i])
@@ -1277,7 +1277,7 @@ def train_comparative_expert_routing_with_weights():
     n_samples = 2000
     grid_size = 64
     batch_size = 32
-    n_epochs = 200
+    n_epochs = 500
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     print("="*60)

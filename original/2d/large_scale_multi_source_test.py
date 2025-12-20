@@ -850,7 +850,7 @@ def plot_training_curves(metrics: Dict[str, Dict[str, List]], save_path: str):
 # 9. Main function
 # ------------------------------------------------------------------
 def main():
-    n_samples, input_dim, n_sources, batch_size, n_epochs = 1000, 64, 128, 32, 200
+    n_samples, input_dim, n_sources, batch_size, n_epochs = 1000, 64, 128, 32, 500
     save_dir = 'results'
 
     dataset = NavierStokes1DDataset(n_samples, input_dim, n_sources)
