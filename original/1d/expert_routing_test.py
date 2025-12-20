@@ -620,21 +620,20 @@ class LagrangianSingleTimeRouter(BaseRouter):
         return output
     
     def _simplex_projection(self, logits: torch.Tensor) -> torch.Tensor:
-        """Project onto simplex"""
-        # Sort in descending order
-        u, _ = torch.sort(logits, descending=True, dim=-1)
+        # 1. Handle potential NaNs in logits before sorting
+        logits = torch.nan_to_num(logits, nan=0.0, posinf=1.0, neginf=-1.0)
         
-        # Find rho
+        u, _ = torch.sort(logits, descending=True, dim=-1)
         cssv = torch.cumsum(u, dim=-1)
         ind = torch.arange(1, logits.shape[-1] + 1, device=logits.device)
         cond = u - (cssv - 1.0) / ind > 0
+        
+        # 2. Safety clamp for rho
         rho = torch.sum(cond, dim=-1, keepdim=True)
-        rho = torch.clamp(rho, min=1)
+        rho = torch.clamp(rho, min=1) 
         
-        # Compute theta
-        theta = (torch.gather(cssv, -1, rho - 1) - 1.0) / rho
-        
-        # Project
+        # 3. Use long() for indexing to avoid device-side asserts
+        theta = (torch.gather(cssv, -1, (rho - 1).long()) - 1.0) / rho
         return F.relu(logits - theta)
     
     def _compute_constraints(self, weights: torch.Tensor) -> torch.Tensor:
