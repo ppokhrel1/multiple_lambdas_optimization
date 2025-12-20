@@ -51,7 +51,7 @@ class EnhancedBurgersDataset2D(Dataset):
     """Enhanced dataset for 2D Burgers' equation with realistic physics regimes"""
     
     def __init__(self, n_samples: int = 1000, grid_size: int = 64, t_final: float = 0.5,
-                 re: float = 100, noise_std: float = 0.02, seed: int = 42,
+                 re: float = 1000, noise_std: float = 0.02, seed: int = 42,
                  include_regimes: bool = True):
         super().__init__()
         self.n_samples = n_samples
@@ -668,7 +668,7 @@ class SoftmaxRouter2D(BaseRouter2D):
     """Softmax-based expert routing for 2D with temperature scaling"""
     
     def __init__(self, n_experts: int = 4, grid_size: int = 64, hidden_dim: int = 256,
-                 temperature: float = 2.0, entropy_weight: float = 0.5):
+                 temperature: float = 1.0, entropy_weight: float = 0.5):
         super().__init__(n_experts, grid_size, hidden_dim)
         self.temperature = temperature
         self.entropy_weight = entropy_weight
@@ -1288,7 +1288,11 @@ class EnhancedExpertRoutingComparativeTrainer2D:
                         predictions = model(u_noisy)
                         recon_loss = huber_loss(predictions, u_solution).mean()
                         
-                        val_metrics[name]['loss'].append(recon_loss.item())
+                        dx = 2.0 / model.grid_size
+                        physics_loss = model.compute_physics_loss(predictions, u_noisy, nu=0.01, dx=dx, t_final=0.5)
+                        
+                        total_loss = recon_loss + 0.001 * physics_loss
+                        val_metrics[name]['loss'].append(total_loss.item())
                         val_metrics[name]['recon_loss'].append(recon_loss.item())
                         
                     else:

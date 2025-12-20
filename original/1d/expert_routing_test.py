@@ -50,7 +50,7 @@ class EnhancedBurgersDataset(Dataset):
     """Enhanced dataset for 1D Burgers' equation with realistic physics regimes"""
     
     def __init__(self, n_samples: int = 2000, grid_size: int = 256, t_final: float = 0.5,
-                 re: float = 100, noise_std: float = 0.02, seed: int = 42,
+                 re: float = 1000, noise_std: float = 0.02, seed: int = 42,
                  include_regimes: bool = True):
         super().__init__()
         self.n_samples = n_samples
@@ -550,7 +550,7 @@ class SoftmaxRouter(BaseRouter):
     """Softmax-based expert routing with temperature scaling"""
     
     def __init__(self, n_experts: int = 4, input_dim: int = 256, hidden_dim: int = 128,
-                 temperature: float = 2.0, entropy_weight: float = 0.5):
+                 temperature: float = 1.0, entropy_weight: float = 0.5):
         super().__init__(n_experts, input_dim, hidden_dim)
         self.temperature = temperature
         self.entropy_weight = entropy_weight
@@ -1174,8 +1174,11 @@ class EnhancedExpertRoutingComparativeTrainer:
                     if name == 'fno':
                         predictions = model(u_noisy)
                         recon_loss = huber_loss(predictions, u_solution).mean()
+                        dx = 2.0 / model.grid_size
+                        physics_loss = model.compute_physics_loss(predictions, u_noisy, nu=0.01, dx=dx, t_final=0.5)
                         
-                        val_metrics[name]['loss'].append(recon_loss.item())
+                        total_loss = recon_loss + 0.001 * physics_loss
+                        val_metrics[name]['loss'].append(total_loss.item())
                         val_metrics[name]['recon_loss'].append(recon_loss.item())
                         
                     else:
