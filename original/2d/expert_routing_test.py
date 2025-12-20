@@ -1407,7 +1407,7 @@ def train_comparative_expert_routing_2d_with_weights():
         n_samples=n_samples,
         grid_size=grid_size,
         t_final=0.5,
-        re=500,
+        re=100,
         noise_std=0.02,
         include_regimes=True
     )
