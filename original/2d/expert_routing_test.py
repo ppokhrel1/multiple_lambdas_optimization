@@ -737,20 +737,17 @@ class LagrangianSingleTimeRouter2D(BaseRouter2D):
         return output
     
     def _simplex_projection(self, logits: torch.Tensor) -> torch.Tensor:
-        # 1. Handle potential NaNs in logits before sorting
-        logits = torch.nan_to_num(logits, nan=0.0, posinf=1.0, neginf=-1.0)
-        
+        """Project onto simplex"""
         u, _ = torch.sort(logits, descending=True, dim=-1)
         cssv = torch.cumsum(u, dim=-1)
+        
         ind = torch.arange(1, logits.shape[-1] + 1, device=logits.device)
         cond = u - (cssv - 1.0) / ind > 0
-        
-        # 2. Safety clamp for rho
         rho = torch.sum(cond, dim=-1, keepdim=True)
-        rho = torch.clamp(rho, min=1) 
+        rho = torch.clamp(rho, min=1)
         
-        # 3. Use long() for indexing to avoid device-side asserts
-        theta = (torch.gather(cssv, -1, (rho - 1).long()) - 1.0) / rho
+        theta = (torch.gather(cssv, -1, rho - 1) - 1.0) / rho
+        
         return F.relu(logits - theta)
     
     def _compute_constraints(self, weights: torch.Tensor) -> torch.Tensor:
@@ -878,18 +875,16 @@ class ADMMRouter2D(BaseRouter2D):
         return x
     
     def _project_simplex(self, v: torch.Tensor) -> torch.Tensor:
+        """Project vectors onto simplex"""
         device = v.device
         v_sorted, _ = torch.sort(v, descending=True, dim=-1)
         cssv = torch.cumsum(v_sorted, dim=-1)
         
         rho = torch.arange(1, v.shape[-1] + 1, device=device).float()
         cond = v_sorted - (cssv - 1.0) / rho > 0
-        
-        # SAFE INDEXING: ensure rho_index is at least 0
         rho_index = torch.sum(cond, dim=-1, keepdim=True) - 1
-        rho_index = torch.clamp(rho_index, min=0).long() # Ensure long type and non-negative
         
-        theta = (torch.gather(cssv, -1, rho_index) - 1.0) / (rho_index.float() + 1.0)
+        theta = (torch.gather(cssv, -1, rho_index) - 1.0) / (rho_index + 1.0)
         
         return F.relu(v - theta)
 
