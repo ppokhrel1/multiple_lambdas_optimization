@@ -37,12 +37,7 @@ class BaseExpertRoutingModel(nn.Module):
         raise NotImplementedError
 
 def huber_loss(pred, target, delta=1.0):
-    """Huber loss for robust training"""
-    diff = pred - target
-    abs_diff = torch.abs(diff)
-    quadratic = torch.min(abs_diff, torch.tensor(delta, device=pred.device))
-    linear = abs_diff - quadratic
-    return 0.5 * quadratic.pow(2) + delta * linear
+    return F.huber_loss(pred, target, reduction='none', delta=delta)
 
 # ==================== Enhanced Burgers Dataset ====================
 
@@ -1297,7 +1292,7 @@ def train_comparative_expert_routing_with_weights():
         n_samples=n_samples,
         grid_size=grid_size,
         t_final=0.5,
-        re=1000,
+        re=500,
         noise_std=0.02,
         include_regimes=True
     )
