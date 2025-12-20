@@ -725,7 +725,7 @@ def train_large_scale_integration_unified():
     # Create dataset
     print("\n1. Creating dataset...")
     dataset = LargeScaleBurgersDataset(
-        n_samples=500,  # Reduced for faster training
+        n_samples=2000,  # Reduced for faster training
         input_dim=64,
         re=100,
         noise_range=(0.05, 0.5),
@@ -819,7 +819,7 @@ def train_large_scale_integration_unified():
     
     # Training
     print("\n3. Training models (100 epochs)...")
-    epochs = 200
+    epochs = 500
     results = {method: [] for method in models.keys()}
     
     # Gradient clipping
