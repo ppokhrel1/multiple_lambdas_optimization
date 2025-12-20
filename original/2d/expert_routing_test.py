@@ -1391,7 +1391,7 @@ def train_comparative_expert_routing_2d_with_weights():
     torch.backends.cudnn.benchmark = False
     
     # Parameters
-    n_samples = 1000
+    n_samples = 5000
     grid_size = 64
     batch_size = 8  # Smaller batch size for 2D
     n_epochs = 500
@@ -1411,7 +1411,7 @@ def train_comparative_expert_routing_2d_with_weights():
         n_samples=n_samples,
         grid_size=grid_size,
         t_final=0.5,
-        re=100,
+        re=1000,
         noise_std=0.02,
         include_regimes=True
     )
