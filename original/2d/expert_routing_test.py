@@ -10,6 +10,7 @@ from enum import Enum
 from collections import defaultdict
 import os
 import gc
+from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings('ignore')
 
@@ -533,7 +534,7 @@ class EnhancedFNOBaseline2D(nn.Module):
         residual_v = v_t.unsqueeze(1) + u_squeezed * v_x + v_squeezed * v_y - nu * (v_xx + v_yy)
         
         # Compute mean squared residual
-        total_residual = torch.mean(residual_u**2 + residual_v**2) * (dx**4)
+        total_residual = torch.mean(residual_u**2 + residual_v**2)
         
         return total_residual
 
@@ -895,7 +896,7 @@ class EnhancedExpertRoutingSystem2D(nn.Module):
     
     def __init__(self, routing_method: str = 'softmax', n_experts: int = 4,
                  grid_size: int = 64, hidden_dim: int = 128, dropout_rate: float = 0.1,
-                 physics_weight: float = 0.01, entropy_weight: float = 0.5,  # Changed weights
+                 physics_weight: float = 1e-3, entropy_weight: float = 0.5,  # Changed weights
                  constraint_weight: float = 0.01, device: str = 'cpu'):  # Changed constraint weight
         super().__init__()
         self.routing_method = routing_method
@@ -1167,9 +1168,9 @@ class EnhancedExpertRoutingComparativeTrainer2D:
                 
                 # Physics loss
                 dx = 2.0 / model.grid_size
-                physics_loss = model.compute_physics_loss(predictions, u_noisy, nu=0.01, dx=dx)
+                physics_loss = model.compute_physics_loss(predictions, u_noisy, nu=0.01, dx=dx, t_final=0.5)
                 
-                total_loss = recon_loss + 0.001 * physics_loss
+                total_loss = recon_loss + 1e-3 * physics_loss
                 total_loss.backward()
                 
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -1415,10 +1416,18 @@ def train_comparative_expert_routing_2d_with_weights():
     # Split dataset
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        dataset, [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)
+    regimes = [dataset[i]['regime'] for i in range(len(dataset))]
+    train_indices, val_indices = train_test_split(
+        range(len(dataset)), 
+        test_size=0.2, 
+        stratify=regimes,
+        random_state=42
     )
+
+    # Create subset datasets
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(dataset, val_indices)
+    
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=2)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=2)

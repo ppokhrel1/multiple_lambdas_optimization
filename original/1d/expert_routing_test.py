@@ -10,6 +10,7 @@ from enum import Enum
 from collections import defaultdict
 import os
 import gc
+from sklearn.model_selection import train_test_split
 
 warnings.filterwarnings('ignore')
 
@@ -421,7 +422,7 @@ class EnhancedFNOBaseline(nn.Module):
         residual = u_t + predictions_norm * u_x - nu * u_xx
         
         # Loss components
-        physics_loss = torch.mean(residual**2) * (dx**2)
+        physics_loss = torch.mean(residual**2)
         
         # Conservation loss (Mass balance)
         mass_initial = torch.trapz(initial_conditions, dx=dx, dim=-1)
@@ -530,7 +531,7 @@ class BaseRouter(nn.Module):
         residual = u_t + predictions_norm * u_x - nu * u_xx
         
         # Loss components
-        physics_loss = torch.mean(residual**2) * (dx**2)
+        physics_loss = torch.mean(residual**2)
         
         # Conservation loss (Mass balance)
         mass_initial = torch.trapz(initial_conditions, dx=dx, dim=-1)
@@ -785,7 +786,7 @@ class EnhancedExpertRoutingSystem(nn.Module):
     
     def __init__(self, routing_method: str = 'softmax', n_experts: int = 4,
                  input_dim: int = 256, hidden_dim: int = 128, dropout_rate: float = 0.1,
-                 physics_weight: float = 0.01, entropy_weight: float = 0.5,  # Changed weights
+                 physics_weight: float = 1e-3, entropy_weight: float = 0.5,  # Changed weights
                  constraint_weight: float = 0.01, device: str = 'cpu'):  # Changed constraint weight
         super().__init__()
         self.routing_method = routing_method
@@ -1302,10 +1303,17 @@ def train_comparative_expert_routing_with_weights():
     # Split dataset
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(
-        dataset, [train_size, val_size],
-        generator=torch.Generator().manual_seed(42)
+    regimes = [dataset[i]['regime'] for i in range(len(dataset))]
+    train_indices, val_indices = train_test_split(
+        range(len(dataset)), 
+        test_size=0.2, 
+        stratify=regimes,
+        random_state=42
     )
+
+    # Create subset datasets
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(dataset, val_indices)
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4)
