@@ -1445,14 +1445,13 @@ def train_comparative_expert_routing_with_weights():
         with torch.no_grad():
             for batch in val_loader:
                 u0 = batch['u0'].to(device)
-                u_noisy = batch['u_noisy'].to(device)
                 u_solution = batch['u_solution'].to(device)
                 
                 if name == 'fno':
-                    predictions = trainer.models[name](u_noisy)
+                    predictions = trainer.models[name](u0)
                     loss = huber_loss(predictions, u_solution).mean()
                 else:
-                    predictions, _ = trainer.models[name](u_noisy)
+                    predictions, _ = trainer.models[name](u0)
                     loss = huber_loss(predictions, u_solution).mean()
                 
                 val_losses.append(loss.item())
