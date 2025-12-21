@@ -1017,9 +1017,9 @@ class EnhancedExpertRoutingComparativeTrainer:
                     lambda_params, lr=learning_rates.get(f'{name}_lambda', 1e-3))
                 
                 self.schedulers[f'{name}_theta'] = torch.optim.lr_scheduler.ExponentialLR(
-                    self.optimizers[f'{name}_theta'], gamma=0.95)
+                    self.optimizers[f'{name}_theta'], gamma=0.99)
                 self.schedulers[f'{name}_lambda'] = torch.optim.lr_scheduler.ExponentialLR(
-                    self.optimizers[f'{name}_lambda'], gamma=0.95)
+                    self.optimizers[f'{name}_lambda'], gamma=0.99)
             else:
                 # Single optimizer for other methods
                 self.optimizers[name] = torch.optim.AdamW(
@@ -1028,7 +1028,7 @@ class EnhancedExpertRoutingComparativeTrainer:
                     weight_decay=1e-6
                 )
                 self.schedulers[name] = torch.optim.lr_scheduler.ExponentialLR(
-                    self.optimizers[name], gamma=0.95)
+                    self.optimizers[name], gamma=0.99)
         
         # Metrics storage
         self.metrics = {name: defaultdict(list) for name in models.keys()}
