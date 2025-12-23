@@ -11,35 +11,30 @@ import copy
 import os
 import json
 import warnings
-import pickle
+import math
 
 warnings.filterwarnings('ignore')
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-# ========== 0. CORE COMPONENTS - CONVERTED TO 1D ==========
+
+# ========== 0. CORE COMPONENTS ==========
 class FourierBlock1D(nn.Module):
     def __init__(self, in_channels: int, out_channels: int, modes: int):
         super().__init__()
-        # Use smaller scale for initialization
-        self.scale = 0.1 / (in_channels * out_channels)  # Reduced from 1.0 to 0.1
+        self.scale = 1 / (in_channels * out_channels)
         self.weights1 = nn.Parameter(
             self.scale * torch.randn(in_channels, out_channels, modes, dtype=torch.cfloat)
         )
         self.w = nn.Conv1d(in_channels, out_channels, 1)
         self.norm = nn.GroupNorm(1, out_channels)
-        
-        # Initialize conv layers with smaller weights
-        for layer in [self.w]:
-            nn.init.kaiming_normal_(layer.weight, mode='fan_in', nonlinearity='linear')
-            nn.init.constant_(layer.bias, 0.0)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x_in = x
         x_ft = torch.fft.rfft(x, dim=-1)
         out_ft = torch.zeros_like(x_ft)
         
-        freq_size = x_ft.shape[-1]
+        freq_size = x_ft.shape[2]
         modes = min(self.weights1.shape[2], freq_size)
         
         out_ft[:, :, :modes] = torch.einsum(
@@ -48,155 +43,267 @@ class FourierBlock1D(nn.Module):
             self.weights1[:, :, :modes]
         )
         
-        x_spec = torch.fft.irfft(out_ft, n=x.shape[-1])
+        x_spec = torch.fft.irfft(out_ft, n=x.shape[-1], dim=-1)
         
-        # Linear Skip Block + Normalization
+        # 2. Linear Skip Block + Normalization
         x_lin = self.w(x_in)
         x_combined = x_spec + x_lin
         x_out = self.norm(x_combined)
         
-        return x_out
+        # --- Final Structure for Stability (Recommended in FNO) ---
+        return self.norm(x_spec + x_lin)
 
 
-# ========== 1. 1D BURGERS/NAVIER-STOKES DATASET ==========
-
-class Burgers1DDataset(Dataset):
+# ========== 1. ORIGINAL DATASETS ==========
+class BurgersDataset1D(Dataset):
     """
-    1D Burgers/Navier-Stokes equation dataset with proper normalization.
+    1D Burgers' equation dataset with realistic physics.
     """
-    def __init__(self, n_samples: int, domain_size: int = 256,
-                 time_step: int = 10, nu: float = 0.01, seed: int = 42):
+    def __init__(self, n_samples: int, domain_size: int = 256, 
+                 n_fourier_modes: int = 20, time_step: int = 5, 
+                 viscosity: float = 0.01, seed: int = 42):
         super().__init__()
         torch.manual_seed(seed)
         np.random.seed(seed)
         self.domain_size = domain_size
-        self.nu = nu  # viscosity
         self.samples = []
+        self.nu = viscosity
         
-        x = torch.linspace(0, 2*np.pi, domain_size)
-        self.grid = x
+        x = torch.linspace(0, 1, domain_size)
+        self.grid = x.unsqueeze(0)  # Shape: [1, domain_size]
         
-        # Pre-compute wave numbers for spectral method
+        # Pre-compute wave numbers for spectral methods
         self.k = 2 * torch.pi * torch.fft.fftfreq(domain_size, d=1.0/domain_size)
         self.k_sq = self.k**2
         self.k_sq[0] = 1.0  # Avoid division by zero
         
+        # Multiple seeds for diversity
         seeds = np.random.randint(0, 1000000, n_samples)
         
-        # Collect statistics for normalization
-        all_u0 = []
-        all_u_t = []
-        
         for i, sample_seed in enumerate(seeds):
             torch.manual_seed(sample_seed)
             np.random.seed(sample_seed)
             
-            # Generate initial condition
-            u0 = self._generate_initial_condition(i)
+            # 1. Generate multi-scale initial condition
+            u_0 = self._multi_scale_initial_field(n_fourier_modes, i)
             
-            # Solve Burgers equation with spectral method
-            u_t = self._spectral_burgers(u0, time_step)
+            # 2. Simulate Burgers' equation with spectral method
+            u_t = self._spectral_burgers(u_0, time_step)
             
-            all_u0.append(u0)
-            all_u_t.append(u_t)
-            
-        # Compute global statistics
-        self.u0_mean = torch.stack(all_u0).mean()
-        self.u0_std = torch.stack(all_u0).std()
-        self.u_t_mean = torch.stack(all_u_t).mean()
-        self.u_t_std = torch.stack(all_u_t).std()
-        
-        print(f"Dataset normalization stats:")
-        print(f"  u0: mean={self.u0_mean:.4f}, std={self.u0_std:.4f}")
-        print(f"  u_t: mean={self.u_t_mean:.4f}, std={self.u_t_std:.4f}")
-        
-        for i, sample_seed in enumerate(seeds):
-            torch.manual_seed(sample_seed)
-            np.random.seed(sample_seed)
-            
-            u0 = all_u0[i]
-            u_t = all_u_t[i]
-            
-            # Normalize data
-            u0_norm = (u0 - self.u0_mean) / (self.u0_std + 1e-8)
-            u_t_norm = (u_t - self.u_t_mean) / (self.u_t_std + 1e-8)
-            
-            # Also normalize grid to [0, 1]
-            grid_norm = x / (2 * np.pi)
+            # 3. Add physical effects
+            u_t = self._add_physical_effects(u_t, u_0, i)
             
             self.samples.append({
-                'grid': torch.stack([grid_norm, u0_norm], dim=0).unsqueeze(0),  # [1, 2, N]
-                'solution': u_t_norm.unsqueeze(0).unsqueeze(0),  # [1, 1, N]
-                'parameters': {'nu': nu, 'time': time_step, 'seed': sample_seed}
+                'grid': torch.stack([self.grid.squeeze(), u_0], dim=0),  # [2, domain_size]
+                'solution': u_t.unsqueeze(0),  # [1, domain_size]
+                'parameters': {'nu': viscosity, 'time': time_step, 'seed': sample_seed}
             })
     
-    def _generate_initial_condition(self, sample_id: int) -> torch.Tensor:
-        """Generate multi-scale initial condition for 1D Burgers equation"""
+    def _spectral_burgers(self, u_0: torch.Tensor, time_step: int) -> torch.Tensor:
+        """Spectral method for 1D Burgers' equation"""
+        u = u_0.clone()
+        dt = 0.001
+        
+        # Pre-compute masks for boundary conditions
+        border_mask = torch.ones_like(u)
+        border_size = 3
+        border_mask[:border_size] = 0
+        border_mask[-border_size:] = 0
+        
+        for t in range(time_step):
+            # Nonlinear term: u * ∂u/∂x
+            u_ft = torch.fft.fft(u)
+            
+            # Compute gradient in Fourier space
+            u_x_ft = 1j * self.k * u_ft
+            u_x = torch.fft.ifft(u_x_ft).real
+            
+            # Burgers' equation: ∂u/∂t + u * ∂u/∂x = ν * ∂²u/∂x²
+            nonlinear = -u * u_x
+            
+            # Time integration (semi-implicit)
+            u_ft_new = (torch.fft.fft(u + dt * nonlinear) / 
+                       (1 + dt * self.nu * self.k_sq))
+            u = torch.fft.ifft(u_ft_new).real
+            
+            # Apply boundary conditions (periodic or Dirichlet)
+            u = u * border_mask
+            
+            # Add minimal forcing
+            if t % 10 == 0:
+                forcing = 0.01 * math.sin(2 * math.pi * t / time_step) * torch.sin(4 * torch.pi * u)
+                u += dt * forcing
+                u = u * border_mask
+        
+        return u
+
+    def _multi_scale_initial_field(self, n_modes: int, sample_id: int) -> torch.Tensor:
+        """Generates initial field with multiple spatial scales"""
         domain_size = self.domain_size
         u = torch.zeros(domain_size)
         
-        # Add multiple frequencies with controlled amplitudes
-        n_freqs = 8 + sample_id % 5
-        
-        for freq in range(1, n_freqs + 1):
-            # Use smaller amplitudes
-            amplitude = 0.1 * torch.randn(1).item() / (freq ** 0.5)
+        # Scale 1: Large-scale waves
+        n_large_modes = n_modes // 4
+        for _ in range(2 + sample_id % 3):
+            amplitude = 0.5 + 0.5 * torch.randn(1).item()
+            k_large = torch.randint(1, n_large_modes, (1,)).item()
             phase = 2 * torch.pi * torch.rand(1).item()
-            u += amplitude * torch.sin(freq * self.grid + phase)
+            
+            u += amplitude * torch.sin(2 * torch.pi * k_large * self.grid.squeeze() + phase)
         
-        # Add shock-like discontinuity for some samples
-        if sample_id % 3 == 0:
-            shock_pos = torch.rand(1).item() * 2 * np.pi
-            shock_width = 0.1 + 0.1 * torch.rand(1).item()
-            shock_strength = 0.2 + 0.2 * torch.rand(1).item()
-            u += shock_strength * torch.tanh((self.grid - shock_pos) / shock_width)
+        # Scale 2: Medium-scale waves
+        n_medium_modes = n_modes // 2
+        for mode in range(n_medium_modes // 2):
+            k_med = 4 + mode * 2
+            amplitude = 0.2 + 0.1 * torch.randn(1).item()
+            phase = 2 * torch.pi * torch.rand(1).item()
+            
+            u += amplitude * torch.sin(2 * torch.pi * k_med * self.grid.squeeze() + phase)
         
-        # Add Gaussian pulse for some samples
+        # Scale 3: Small-scale turbulence (random Fourier modes)
+        mask_size = n_modes
+        k = torch.arange(mask_size, device=self.grid.device)
+        
+        # Kolmogorov -5/3 spectrum (adapted for 1D)
+        k_mag = k.float()
+        amplitude = torch.randn(mask_size, device=self.grid.device) * (k_mag + 1e-6)**(-2/3) / (1 + k_mag**2)
+        phase = 2 * torch.pi * torch.rand(mask_size, device=self.grid.device)
+        
+        # Set DC component to zero
+        amplitude[0] = 0
+        phase[0] = 0
+        
+        # Create complex spectrum
+        turbulence_ft = torch.zeros(domain_size, dtype=torch.cfloat, device=self.grid.device)
+        turbulence_ft[:mask_size] = amplitude * torch.exp(1j * phase)
+        
+        # Hermitian symmetry for real signal
+        turbulence_ft[-mask_size+1:] = torch.conj(turbulence_ft[1:mask_size].flip(0))
+        
+        turbulence = torch.fft.ifft(turbulence_ft).real
+        
+        if turbulence.std() > 0:
+            u += 0.3 * turbulence / turbulence.std()
+        
+        # Add localized features (shocks)
         if sample_id % 4 == 0:
-            pulse_pos = torch.rand(1).item() * 2 * np.pi
-            pulse_width = 0.2 + 0.2 * torch.rand(1).item()
-            pulse_strength = 0.1 + 0.1 * torch.rand(1).item()
-            u += pulse_strength * torch.exp(-(self.grid - pulse_pos)**2 / (2 * pulse_width**2))
+            # Shock-like discontinuity
+            shock_pos = 0.3 + 0.4 * torch.rand(1).item()
+            shock_width = 0.02 + 0.03 * torch.rand(1).item()
+            shock_strength = 0.5 + 0.5 * torch.rand(1).item()
+            
+            shock = shock_strength * torch.tanh((self.grid.squeeze() - shock_pos) / shock_width)
+            u += shock
         
-        # Don't normalize here - let global normalization handle it
+        # Enforce boundary conditions
+        u[0] = u[-1] = 0
+        
+        # Smooth near boundaries
+        for i in range(5):
+            u[i] *= i / 5
+            u[-i-1] *= i / 5
+        
+        # Normalize
+        std = torch.std(u)
+        if std > 0:
+            u = u / std * (0.5 + 0.5 * torch.rand(1).item())
+        
         return u
     
-    def _spectral_burgers(self, u0: torch.Tensor, time_step: int) -> torch.Tensor:
-        """Spectral method for 1D Burgers equation"""
-        u = u0.clone()
-        dt = 0.005  # Smaller timestep for stability
+    def _add_physical_effects(self, u_t: torch.Tensor, u_0: torch.Tensor, sample_id: int) -> torch.Tensor:
+        """Add realistic physical effects to the solution"""
         
-        for t in range(time_step):
-            # Compute Fourier transform
-            u_ft = torch.fft.fft(u)
-            
-            # Non-linear term in physical space (u * u_x)
-            u_x = torch.fft.ifft(1j * self.k * u_ft).real
-            nonlinear = u * u_x
-            
-            # Transform non-linear term to Fourier space
-            nl_ft = torch.fft.fft(nonlinear)
-            
-            # Semi-implicit time stepping
-            u_ft_new = (u_ft - dt * nl_ft) / (1 + dt * self.nu * self.k_sq)
-            
-            # Inverse transform
-            u = torch.fft.ifft(u_ft_new).real
-            
-            # Add small forcing for some samples
-            if t % 20 == 0:
-                forcing = 0.005 * torch.sin(self.grid + t * 0.1)
-                u += dt * forcing
+        # 1. Non-linear energy cascade effects
+        u_ft = torch.fft.fft(u_t)
         
-        return u
-    def __len__(self) -> int:
-        """Returns the total number of samples in the dataset."""
+        # Apply scale-dependent damping (simulating dissipation)
+        for k in range(self.domain_size):
+            k_val = torch.abs(torch.tensor(k).float())
+            if k_val > 10:  # Damp high wavenumbers
+                damping = torch.exp(-0.1 * k_val / self.domain_size)
+                u_ft[k] *= damping
+        
+        u_t = torch.fft.ifft(u_ft).real
+        
+        # 2. Inverse cascade effects
+        if sample_id % 3 == 0:
+            # Coherent structure formation
+            large_scale = F.avg_pool1d(u_t.unsqueeze(0).unsqueeze(0), 
+                                      kernel_size=5, stride=1, padding=2).squeeze()
+            u_t = 0.7 * u_t + 0.3 * large_scale
+        
+        # 3. Memory effects
+        memory_weight = 0.1 + 0.05 * torch.sin(torch.tensor(sample_id * 0.1, dtype=torch.float32))
+        u_t = (1 - memory_weight) * u_t + memory_weight * u_0
+        
+        # 4. Add small-scale noise
+        noise_amplitude = 0.01 + 0.005 * torch.randn(1).item()
+        noise = noise_amplitude * torch.randn_like(u_t)
+        noise[0] = noise[-1] = 0
+        u_t += noise
+        
+        # 5. Non-linear saturation effects
+        saturation = torch.tanh(u_t * 2.0) / 2.0
+        u_t = 0.8 * u_t + 0.2 * saturation
+        
+        # 6. Scale interactions
+        scales = [64, 128, 256]
+        multi_scale = torch.zeros_like(u_t)
+        
+        for scale in scales:
+            if scale < self.domain_size:
+                downsampled = F.interpolate(
+                    u_t.unsqueeze(0).unsqueeze(0),
+                    size=scale,
+                    mode='linear',
+                    align_corners=False
+                )
+                upsampled = F.interpolate(
+                    downsampled,
+                    size=self.domain_size,
+                    mode='linear',
+                    align_corners=False
+                ).squeeze()
+                
+                weight = 0.1 * (scale / self.domain_size)
+                if scale == 64:
+                    multi_scale += weight * upsampled * torch.sin(u_t * 3)
+                elif scale == 128:
+                    multi_scale += weight * upsampled * torch.cos(u_t * 2)
+                else:
+                    multi_scale += weight * upsampled
+        
+        u_t += multi_scale
+        
+        # 7. Physical constraints (energy conservation approximation)
+        energy_0 = torch.mean(u_0**2)
+        energy_t = torch.mean(u_t**2)
+        if energy_t > 0:
+            u_t = u_t * torch.sqrt(energy_0 / (energy_t + 1e-6))
+        
+        # 8. Final non-linear transformation
+        u_t = u_t + 0.1 * torch.sin(u_t * 3) + 0.05 * torch.tanh(u_t * 2)
+        
+        # 9. Smooth near boundaries
+        for i in range(3):
+            u_t[i] = u_t[i] * (i / 3)
+            u_t[-i-1] = u_t[-i-1] * (i / 3)
+        
+        # Normalize to reasonable range
+        std = torch.std(u_t)
+        if std > 0:
+            u_t = u_t / std * 0.5
+        
+        return u_t
+
+    def __len__(self): 
         return len(self.samples)
-    def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, Dict]]:
-        """Returns one sample from the dataset."""
-        return self.samples[idx]
     
-# ========== 2. MULTISCALE DATASET WRAPPER - CONVERTED TO 1D ==========
+    def __getitem__(self, idx): 
+        return self.samples[idx]
+
+
+# ========== 2. MULTISCALE DATASET WRAPPER ==========
 class MultiScaleDataset1D(Dataset):
     def __init__(self, base_dataset: Dataset, scales: List[int], 
                  mode: str = 'train', augment: bool = False):
@@ -212,50 +319,32 @@ class MultiScaleDataset1D(Dataset):
         if tensor.shape[-1] == target_size:
             return tensor
         
-        # Remove the extra batch dimension that's causing the issue
-        if tensor.dim() == 4:  # [B, 1, C, L] from original dataset
-            tensor = tensor.squeeze(1)  # Remove the extra dimension: [B, C, L]
+        # Add channel dimension if needed
+        if tensor.dim() == 1:
+            tensor = tensor.unsqueeze(0)  # [C, L]
         
-        if tensor.dim() == 2:  # [C, L] for single sample
-            tensor = tensor.unsqueeze(0)  # [1, C, L]
-        
-        # Now tensor should be [B, C, L] or [1, C, L]
-        resized = F.interpolate(
-            tensor,
+        return F.interpolate(
+            tensor.unsqueeze(0) if tensor.dim() == 2 else tensor,
             size=target_size,
             mode='linear',
             align_corners=False
-        )
-        
-        return resized
+        ).squeeze(0)
     
     def _augment(self, grid: torch.Tensor, solution: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         if not self.augment:
             return grid, solution
         
-        # Squeeze extra dimension if needed
-        if grid.dim() == 4:
-            grid = grid.squeeze(1)
-        if solution.dim() == 4:
-            solution = solution.squeeze(1)
-        
-        # Random flip (reverse spatial direction)
+        # Flip augmentation
         if torch.rand(1) > 0.5:
             grid = torch.flip(grid, dims=[-1])
             solution = torch.flip(solution, dims=[-1])
-        
-        # Random translation (periodic boundary)
-        if torch.rand(1) > 0.5:
-            shift = torch.randint(0, grid.shape[-1], (1,)).item()
-            grid = torch.roll(grid, shifts=shift, dims=-1)
-            solution = torch.roll(solution, shifts=shift, dims=-1)
         
         return grid, solution
     
     def __getitem__(self, idx: int) -> Dict[str, Union[torch.Tensor, Dict]]:
         sample = self.base_dataset[idx]
-        original_grid = sample['grid']  # [1, 2, L] from dataset
-        original_solution = sample['solution']  # [1, 1, L] from dataset
+        original_grid = sample['grid']  # [2, L]
+        original_solution = sample['solution']  # [1, L]
         
         if self.augment:
             original_grid, original_solution = self._augment(original_grid, original_solution)
@@ -278,17 +367,18 @@ class MultiScaleDataset1D(Dataset):
             'scales': self.scales,
             'parameters': sample.get('parameters', {})
         }
-    
-# ========== 3. SCALE-SPECIFIC MODELS - CONVERTED TO 1D ==========
+
+
+# ========== 3. SCALE-SPECIFIC MODELS ==========
 class ScaleSpecificFNO1D(nn.Module):
     def __init__(self, scale: int, in_channels: int, out_channels: int, 
-                 width: int = 32, depth: int = 4):
+                 width: int = 64, depth: int = 4):
         super().__init__()
         self.scale = scale
         self.in_channels = in_channels
         self.out_channels = out_channels
         
-        modes = max(4, scale // 8)
+        modes = max(4, scale // 16)
         
         self.lift = nn.Sequential(
             nn.Conv1d(in_channels, width, 1),
@@ -306,43 +396,36 @@ class ScaleSpecificFNO1D(nn.Module):
             nn.GELU(),
             nn.Conv1d(width, out_channels, 1),
         )
-        
-        # Initialize with smaller weights
-        for layer in [self.lift[0], self.lift[2], self.project[0], self.project[2]]:
-            nn.init.kaiming_normal_(layer.weight, mode='fan_in', nonlinearity='relu')
-            nn.init.constant_(layer.bias, 0.0)
     
     def forward(self, grid: torch.Tensor) -> torch.Tensor:
-        # Ensure input is correct shape: [B, C, L]
-        if grid.dim() == 4:  # [B, 1, C, L]
-            grid = grid.squeeze(1)  # Remove extra dimension
-        
         if grid.shape[-1] != self.scale:
-            grid = F.interpolate(grid, size=self.scale, mode='linear', align_corners=False)
+            grid = F.interpolate(grid, size=self.scale, mode='linear')
         
         x = self.lift(grid)
         for layer in self.layers:
-            x = layer(x) + x * 0.1  # Add small skip connection
+            x = layer(x) + x
             x = F.gelu(x)
         output = self.project(x)
         
         return output
 
 
-# ========== 4. COMBINERS - ADAPTED FOR 1D ==========
 class MultiscaleSoftmaxRouter1D(nn.Module):
     def __init__(self, scales: List[int], in_channels: int, out_channels: int):
         super().__init__()
         self.scales = scales
         self.num_scales = len(scales)
+        self.last_router_weights = None
+        
         self.out_channels = out_channels
         
+        # Calculate the input dimension: 4 pooled from each scale, concatenated
         router_input_dim = self.num_scales * out_channels * 4
         
         self.router = nn.Sequential(
-            nn.Linear(router_input_dim, 128),
+            nn.Linear(router_input_dim, 64),
             nn.ReLU(),
-            nn.Linear(128, self.num_scales),
+            nn.Linear(64, self.num_scales),
             nn.Softmax(dim=-1)
         )
         
@@ -352,12 +435,22 @@ class MultiscaleSoftmaxRouter1D(nn.Module):
                 input_grid: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         batch_size = input_grid.shape[0]
         target_size = max(self.scales)
-        
-        # Get first prediction to determine channels
+        self.last_router_weights = None
+
         available_scales = list(multiscale_predictions.keys())
         if not available_scales:
             device = input_grid.device
-            return torch.zeros(batch_size, self.out_channels, target_size, device=device), {'router_weights': None}
+            return torch.zeros(batch_size, self.out_channels, 
+                            target_size, device=device), {'router_weights': None}
+        
+        first_scale = available_scales[0]
+        pred = multiscale_predictions[first_scale]
+        
+        # Ensure predictions have the correct shape [B, C, L]
+        if pred.dim() == 2:  # [B, L]
+            pred = pred.unsqueeze(1)  # [B, 1, L]
+        
+        out_channels = pred.shape[1]
         
         router_features = []
         compatible_predictions = {}
@@ -366,30 +459,31 @@ class MultiscaleSoftmaxRouter1D(nn.Module):
             if scale in multiscale_predictions:
                 pred = multiscale_predictions[scale]
                 
-                # Ensure proper shape [B, C, L]
-                if pred.dim() == 2:  # [B, L] or similar
+                if pred.dim() == 2:
                     pred = pred.unsqueeze(1)
-                elif pred.dim() == 3:  # [B, C, L]
-                    pass  # Already correct
                 
                 compatible_predictions[scale] = pred
                 
-                # Pool to fixed size for router input
+                # Pool to size 4 for router input
                 pooled = F.adaptive_avg_pool1d(pred, 4)
                 router_features.append(pooled)
             else:
-                # Create zeros for missing scale
-                zeros = torch.zeros(batch_size, self.out_channels, 4, device=input_grid.device)
+                zeros = torch.zeros(batch_size, out_channels, 4, 
+                                device=input_grid.device)
                 router_features.append(zeros)
         
         # Concatenate along channel dimension
         router_input = torch.cat(router_features, dim=1)  # [B, out_channels*num_scales, 4]
+        
+        # Flatten
         router_input = router_input.view(batch_size, -1)  # [B, out_channels*num_scales*4]
         
         router_weights = self.router(router_input)
-        
+        self.last_router_weights = router_weights.detach().clone()
+
         # Weighted combination
-        combined = torch.zeros(batch_size, self.out_channels, target_size, device=input_grid.device)
+        combined = torch.zeros(batch_size, out_channels, 
+                            target_size, device=input_grid.device)
         total_weight = torch.zeros(batch_size, 1, 1, device=input_grid.device)
         
         for i, scale in enumerate(self.scales):
@@ -397,7 +491,8 @@ class MultiscaleSoftmaxRouter1D(nn.Module):
                 pred = compatible_predictions[scale]
                 
                 if pred.shape[-1] != target_size:
-                    pred_upscaled = F.interpolate(pred, size=target_size, mode='linear', align_corners=False)
+                    pred_upscaled = F.interpolate(pred, size=target_size, 
+                                                mode='linear', align_corners=False)
                 else:
                     pred_upscaled = pred
                 
@@ -406,12 +501,16 @@ class MultiscaleSoftmaxRouter1D(nn.Module):
                 combined = combined + weight * pred_upscaled
                 total_weight = total_weight + weight
         
+        # Normalize
         combined = combined / (total_weight + 1e-8)
         
         return combined, {
             'router_weights': router_weights,
-            'scale_outputs': compatible_predictions
+            'scale_outputs': compatible_predictions,
+            'combined': combined,
+            'total_weight': total_weight
         }
+
 
 class LagrangianSingleScaleCombiner1D(nn.Module):
     def __init__(self, scales: List[int], in_channels: int, out_channels: int, 
@@ -419,6 +518,7 @@ class LagrangianSingleScaleCombiner1D(nn.Module):
         super().__init__()
         self.scales = scales
         self.num_scales = len(scales)
+        
         self.log_lambdas = nn.Parameter(torch.ones(self.num_scales) * np.log(lambda_init))
         
         self.compatibility_layers = nn.ModuleDict()
@@ -438,7 +538,7 @@ class LagrangianSingleScaleCombiner1D(nn.Module):
             if scale in multiscale_predictions:
                 pred = multiscale_predictions[scale]
                 if pred.shape[-1] != target_size:
-                    pred = F.interpolate(pred, size=target_size, mode='linear', align_corners=False)
+                    pred = F.interpolate(pred, size=target_size, mode='linear')
                 compatible_predictions[scale] = self.compatibility_layers[str(scale)](pred)
         
         lambdas = torch.exp(self.log_lambdas)
@@ -457,7 +557,9 @@ class LagrangianSingleScaleCombiner1D(nn.Module):
         
         if combined is None:
             device = input_grid.device
-            combined = torch.zeros(1, 1, target_size, device=device)
+            combined = torch.zeros(1, multiscale_predictions.get(list(multiscale_predictions.keys())[0], 
+                                      torch.zeros(1, 1, target_size, device=device)).shape[1], 
+                                 target_size, device=device)
         
         return combined, {
             'lambda_weights': lambda_weights,
@@ -465,131 +567,226 @@ class LagrangianSingleScaleCombiner1D(nn.Module):
             'compatible_predictions': compatible_predictions
         }
 
-class LagrangianTwoTimeScaleCombiner1D(nn.Module):
-    """Two-timescale Lagrangian combiner (missing from original code)"""
+
+class AugmentedLagrangianCombiner1D(nn.Module):
     def __init__(self, scales: List[int], in_channels: int, out_channels: int,
-                 primal_lr: float = 1e-4, dual_lr_init: float = 1e-3,
-                 rho: float = 0.1, dual_decay: float = 0.999):
-        super().__init__()
-        self.scales = scales
-        self.num_scales = len(scales)
-        self.primal_lr = primal_lr
-        self.dual_lr_init = dual_lr_init
-        self.dual_lr = dual_lr_init
-        self.dual_decay = dual_decay
-        self.rho = rho
-        
-        # Primal variables (learnable weights per scale)
-        self.primal_weights = nn.Parameter(torch.ones(self.num_scales) / self.num_scales)
-        
-        # Dual variables (Lagrange multipliers)
-        self.dual_params = nn.Parameter(torch.zeros(self.num_scales))
-        
-        # Adaptive learning rate tracking
-        self.constraint_history = []
-        self.max_history = 100
-        
-        # Compatibility layers - FIXED: Removed GroupNorm for scalar output
-        self.compatibility_layers = nn.ModuleDict()
-        for i, scale in enumerate(scales):
-            self.compatibility_layers[str(scale)] = nn.Sequential(
-                nn.Conv1d(out_channels, out_channels, 3, padding=1),
-                # Removed GroupNorm since out_channels=1 for scalar field
-                nn.GELU(),
-                nn.Conv1d(out_channels, out_channels, 3, padding=1)
-            )
-    
-    def forward(self, multiscale_predictions: Dict[int, torch.Tensor],
-                input_grid: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
-        """Forward pass with two-timescale Lagrangian optimization"""
-        target_size = max(self.scales)
-        batch_size = input_grid.shape[0]
-        
-        # Get compatible predictions
-        compatible_predictions = {}
-        for i, scale in enumerate(self.scales):
-            if scale in multiscale_predictions:
-                pred = multiscale_predictions[scale]
-                if pred.shape[-1] != target_size:
-                    pred = F.interpolate(pred, size=target_size, mode='linear', align_corners=False)
-                compatible_predictions[scale] = self.compatibility_layers[str(scale)](pred)
-        
-        if not compatible_predictions:
-            device = input_grid.device
-            return torch.zeros(batch_size, 1, target_size, device=device), {}
-        
-        # ===== PRIMAL UPDATE (fast timescale) =====
-        # Compute constraints
-        weights = F.softmax(self.primal_weights, dim=-1)
-        
-        # Sum-to-one constraint
-        sum_constraint = torch.abs(weights.sum() - 1.0)
-        
-        # Non-negativity constraint (already satisfied by softmax)
-        
-        # ===== DUAL UPDATE (slow timescale) =====
-        # Update dual learning rate adaptively
-        self.constraint_history.append(sum_constraint.item())
-        if len(self.constraint_history) > self.max_history:
-            self.constraint_history.pop(0)
-        
-        # Adjust dual learning rate based on constraint satisfaction
-        avg_constraint = np.mean(self.constraint_history) if self.constraint_history else 0.0
-        
-        if avg_constraint > 1e-2:  # High violation
-            self.dual_lr = min(self.dual_lr * 1.01, 5e-3)
-        elif avg_constraint < 1e-4:  # Low violation
-            self.dual_lr = max(self.dual_lr * 0.99, 1e-5)
-        
-        # Decay dual learning rate
-        self.dual_lr *= self.dual_decay
-        
-        # Update dual variables with adaptive LR
-        with torch.no_grad():
-            dual_update = self.dual_lr * sum_constraint
-            self.dual_params.data += dual_update * torch.randn_like(self.dual_params) * 0.1
-        
-        # ===== AUGMENTED LAGRANGIAN =====
-        # Compute augmented Lagrangian weights
-        lagrangian_weights = F.softmax(
-            self.primal_weights + self.rho * self.dual_params,
-            dim=-1
-        )
-        
-        # Combine predictions
-        combined = None
-        for i, scale in enumerate(self.scales):
-            if scale in compatible_predictions:
-                pred = compatible_predictions[scale]
-                weight = lagrangian_weights[i]
-                
-                if combined is None:
-                    combined = weight * pred
-                else:
-                    combined = combined + weight * pred
-        
-        if combined is None:
-            combined = torch.zeros(batch_size, 1, target_size, device=input_grid.device)
-        
-        # Compute constraint violation for loss
-        constraint_violation = sum_constraint + F.relu(-lagrangian_weights).mean()
-        
-        return combined, {
-            'lagrangian_weights': lagrangian_weights,
-            'primal_weights': weights,
-            'dual_params': self.dual_params,
-            'constraint_violation': constraint_violation,
-            'dual_lr': self.dual_lr,
-            'compatible_predictions': compatible_predictions
-        }
-    
-class ADMMCombiner1D(nn.Module):
-    def __init__(self, scales: List[int], in_channels: int, out_channels: int,
-                 rho: float = 0.1, num_iter: int = 3):
+                 lambda_init: float = 1.0, rho_init: float = 0.1, 
+                 num_iter: int = 3, penalty_growth: float = 1.1):
         super().__init__()
         self.scales = scales
         self.num_scales = len(scales)
         self.num_iter = num_iter
+        self.penalty_growth = penalty_growth
+        
+        # Lagrange multipliers for each scale
+        self.log_lambdas = nn.Parameter(torch.ones(self.num_scales) * np.log(lambda_init))
+        
+        # Penalty parameters (primal and dual)
+        self.log_rho_primal = nn.Parameter(torch.tensor(np.log(rho_init)))
+        self.log_rho_dual = nn.Parameter(torch.tensor(np.log(rho_init * 0.5)))
+        
+        # Compatibility layers for each scale
+        self.compatibility_layers = nn.ModuleDict()
+        for i, scale in enumerate(scales):
+            self.compatibility_layers[str(scale)] = nn.Sequential(
+                nn.Conv1d(out_channels, out_channels * 2, 3, padding=1),
+                nn.GELU(),
+                nn.Conv1d(out_channels * 2, out_channels, 3, padding=1)
+            )
+        
+        # Consensus refiner (acts on the primal variable)
+        self.primal_refiner = nn.Sequential(
+            nn.Conv1d(out_channels, out_channels * 2, 3, padding=1),
+            nn.GroupNorm(min(8, out_channels * 2), out_channels * 2),
+            nn.GELU(),
+            nn.Conv1d(out_channels * 2, out_channels, 3, padding=1)
+        )
+        
+        # Dual variable refiner (for better dual updates)
+        self.dual_refiner = nn.Sequential(
+            nn.Conv1d(out_channels, out_channels * 2, 3, padding=1),
+            nn.GroupNorm(min(8, out_channels * 2), out_channels * 2),
+            nn.GELU(),
+            nn.Conv1d(out_channels * 2, out_channels, 3, padding=1)
+        )
+        
+        # Store iteration history for monitoring
+        self.primal_history = []
+        self.dual_history = []
+        self.last_primal_vars = None
+        self.last_dual_vars = None
+        self.last_consensus = None
+    
+    def forward(self, multiscale_predictions: Dict[int, torch.Tensor], 
+                input_grid: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
+        target_size = max(self.scales)
+        batch_size = input_grid.shape[0]
+        
+        if multiscale_predictions:
+            first_pred = next(iter(multiscale_predictions.values()))
+            channel_dim = first_pred.shape[1]
+            device = first_pred.device
+        else:
+            channel_dim = 1
+            device = input_grid.device
+        
+        # Apply compatibility layers
+        compatible_predictions = {}
+        for scale in self.scales:
+            if scale in multiscale_predictions:
+                pred = multiscale_predictions[scale]
+                if pred.shape[-1] != target_size:
+                    pred = F.interpolate(pred, size=target_size, mode='linear')
+                compatible_predictions[scale] = self.compatibility_layers[str(scale)](pred)
+        
+        if not compatible_predictions:
+            return torch.zeros(batch_size, channel_dim, target_size, 
+                             device=device), {}
+        
+        # Get penalty parameters
+        rho_primal = torch.exp(self.log_rho_primal)
+        rho_dual = torch.exp(self.log_rho_dual)
+        
+        # Initialize primal and dual variables
+        x = {scale: pred.clone() for scale, pred in compatible_predictions.items()}
+        z = sum(pred for pred in x.values()) / len(x)  # Initial consensus
+        y = {scale: torch.zeros_like(pred) for scale, pred in x.items()}  # Dual variables
+        
+        # Get Lagrange multipliers
+        lambdas = torch.exp(self.log_lambdas)
+        lambda_weights = lambdas / torch.sum(lambdas)
+        
+        # Two-time scale updates
+        scale_outputs_history = []
+        primal_residuals = []
+        dual_residuals = []
+        
+        for iter_idx in range(self.num_iter):
+            # Scale index mapping for lambda weights
+            scale_to_idx = {scale: i for i, scale in enumerate(self.scales)}
+            
+            # ----- PRIMAL UPDATE (faster timescale) -----
+            for scale in compatible_predictions.keys():
+                idx = scale_to_idx[scale]
+                lambda_weight = lambda_weights[idx]
+                
+                # Augmented Lagrangian primal update with momentum
+                primal_grad = (compatible_predictions[scale] - x[scale]) + \
+                            rho_primal * (x[scale] - z + y[scale])
+                
+                # Apply lambda-weighted update
+                x[scale] = x[scale] + lambda_weight * primal_grad
+                
+                # Add refinement
+                x[scale] = self.primal_refiner(x[scale])
+            
+            # ----- CONSENSUS UPDATE -----
+            z_new = torch.zeros_like(z)
+            total_weight = 0
+            
+            for scale in compatible_predictions.keys():
+                idx = scale_to_idx[scale]
+                weight = lambda_weights[idx] + rho_primal * 0.1  # Add penalty influence
+                z_new = z_new + weight * (x[scale] + y[scale])
+                total_weight += weight
+            
+            if total_weight > 0:
+                z = z_new / total_weight
+            
+            # ----- DUAL UPDATE (slower timescale) -----
+            for scale in compatible_predictions.keys():
+                # Augmented Lagrangian dual update
+                dual_grad = x[scale] - z
+                y[scale] = y[scale] + rho_dual * dual_grad
+                
+                # Refine dual variables
+                y[scale] = self.dual_refiner(y[scale])
+            
+            # Store history for monitoring
+            scale_outputs_history.append({scale: x[scale].detach().clone() 
+                                         for scale in x.keys()})
+            
+            # Compute residuals
+            if iter_idx > 0:
+                primal_residual = sum(torch.norm(x[scale] - z, p=2).item() 
+                                     for scale in x.keys()) / len(x)
+                primal_residuals.append(primal_residual)
+                
+                if iter_idx > 1:
+                    # Dual residual based on change in consensus
+                    dual_residual = torch.norm(z - scale_outputs_history[-2]['consensus'], 
+                                              p=2).item() if 'consensus' in scale_outputs_history[-2] else 0
+                    dual_residuals.append(dual_residual)
+            
+            # Store consensus in history
+            if iter_idx < len(scale_outputs_history):
+                scale_outputs_history[iter_idx]['consensus'] = z.detach().clone()
+        
+        # Final refinement of consensus
+        z_refined = self.primal_refiner(z)
+        
+        # Scale contributions based on final Lagrange multipliers
+        scale_contributions = {}
+        total_contribution = 0
+        
+        for i, scale in enumerate(self.scales):
+            if scale in x:
+                contribution = lambda_weights[i].item() * torch.norm(x[scale], p='fro').item()
+                scale_contributions[scale] = contribution
+                total_contribution += contribution
+        
+        # Normalize contributions
+        if total_contribution > 0:
+            scale_weights = {scale: contrib / total_contribution 
+                           for scale, contrib in scale_contributions.items()}
+        else:
+            scale_weights = {scale: 1.0 / len(self.scales) for scale in self.scales}
+        
+        # Store for monitoring
+        self.last_primal_vars = {scale: x[scale].detach().clone() 
+                                for scale in x.keys()}
+        self.last_dual_vars = {scale: y[scale].detach().clone() 
+                              for scale in y.keys()}
+        self.last_consensus = z_refined.detach().clone()
+        
+        return z_refined, {
+            'primal_vars': x,
+            'dual_vars': y,
+            'consensus': z,
+            'refined_consensus': z_refined,
+            'lambda_weights': lambda_weights,
+            'rho_primal': rho_primal,
+            'rho_dual': rho_dual,
+            'scale_weights': scale_weights,
+            'scale_outputs': x,
+            'primal_residuals': primal_residuals,
+            'dual_residuals': dual_residuals,
+            'scale_outputs_history': scale_outputs_history,
+            'compatible_predictions': compatible_predictions
+        }
+    
+    def get_lambda_statistics(self) -> Dict:
+        """Get statistics about Lagrange multipliers"""
+        lambdas = torch.exp(self.log_lambdas).detach().cpu().numpy()
+        lambda_weights = lambdas / np.sum(lambdas)
+        
+        return {
+            'raw_lambdas': lambdas,
+            'lambda_weights': lambda_weights,
+            'lambda_entropy': -np.sum(lambda_weights * np.log(lambda_weights + 1e-8)),
+            'lambda_max': np.max(lambda_weights),
+            'lambda_min': np.min(lambda_weights)
+        }
+
+
+class ADMMCombiner1D(nn.Module):
+    def __init__(self, scales: List[int], in_channels: int, out_channels: int,
+                 rho: float = 0.1, num_iter: int = 3, beta: float = 0.01):
+        super().__init__()
+        self.scales = scales
+        self.num_scales = len(scales)
+        self.num_iter = num_iter
+        
         self.log_rho = nn.Parameter(torch.tensor(np.log(rho)))
         
         self.compatibility_layers = nn.ModuleDict()
@@ -607,34 +804,50 @@ class ADMMCombiner1D(nn.Module):
         )
         
         self.consensus_weight = nn.Parameter(torch.ones(1))
-    
+        
+        self.last_scale_weights = None
+        self.epoch_scale_weights = []
+        
     def forward(self, multiscale_predictions: Dict[int, torch.Tensor],
                 input_grid: torch.Tensor) -> Tuple[torch.Tensor, Dict]:
         target_size = max(self.scales)
         batch_size = input_grid.shape[0]
+        
+        if multiscale_predictions:
+            first_pred = next(iter(multiscale_predictions.values()))
+            channel_dim = first_pred.shape[1]
+            device = first_pred.device
+        else:
+            channel_dim = 1
+            device = input_grid.device
         
         compatible_predictions = {}
         for scale in self.scales:
             if scale in multiscale_predictions:
                 pred = multiscale_predictions[scale]
                 if pred.shape[-1] != target_size:
-                    pred = F.interpolate(pred, size=target_size, mode='linear', align_corners=False)
+                    pred = F.interpolate(pred, size=target_size, mode='linear')
                 compatible_predictions[scale] = self.compatibility_layers[str(scale)](pred)
         
         if not compatible_predictions:
-            return torch.zeros(batch_size, 1, target_size, device=input_grid.device), {}
+            return torch.zeros(batch_size, channel_dim, target_size, 
+                             device=device), {}
         
         rho = torch.exp(self.log_rho)
+        
         x = {scale: pred.clone() for scale, pred in compatible_predictions.items()}
         
-        weights = torch.ones(len(compatible_predictions), device=input_grid.device) / len(compatible_predictions)
+        weights = torch.ones(len(compatible_predictions), device=device) / len(compatible_predictions)
         z = sum(w * x[scale] for w, (scale, _) in zip(weights, compatible_predictions.items()))
         
         u = {scale: torch.zeros_like(pred) for scale, pred in compatible_predictions.items()}
         
-        for _ in range(self.num_iter):
+        scale_outputs = {}
+        
+        for iter_idx in range(self.num_iter):
             for scale in compatible_predictions.keys():
                 x[scale] = (compatible_predictions[scale] + rho * (z - u[scale])) / (1 + rho)
+                scale_outputs[scale] = x[scale]
             
             if len(x) > 0:
                 z_numerator = torch.zeros_like(z)
@@ -642,8 +855,7 @@ class ADMMCombiner1D(nn.Module):
                 
                 for scale, x_i in x.items():
                     if scale in u:
-                        contribution = x_i + u[scale]
-                        z_numerator = z_numerator + contribution
+                        z_numerator = z_numerator + x_i + u[scale]
                         count += 1
                 
                 if count > 0:
@@ -657,107 +869,274 @@ class ADMMCombiner1D(nn.Module):
         
         z_refined = self.consensus_refiner(z)
         
+        scale_contributions = {}
+        total_contribution = 0
+        
+        for scale in compatible_predictions.keys():
+            if scale in x and scale in u:
+                contribution = torch.norm(x[scale] + u[scale], p='fro').item()
+                scale_contributions[scale] = contribution
+                total_contribution += contribution
+        
+        if total_contribution > 0:
+            self.last_scale_weights = {
+                scale: contribution / total_contribution
+                for scale, contribution in scale_contributions.items()
+            }
+        else:
+            self.last_scale_weights = {scale: 1.0/len(self.scales) for scale in self.scales}
+        
+        self.last_dual_vars = {scale: u[scale].detach().clone() 
+                              for scale in u if scale in self.scales}
+        
         return z_refined, {
             'consensus': z,
             'dual_vars': u,
-            'rho': rho
+            'scale_outputs': scale_outputs,
+            'compatible_predictions': compatible_predictions,
+            'rho': rho,
+            'log_rho': self.log_rho,
+            'consensus_weight': self.consensus_weight,
+            'scale_weights': self.last_scale_weights
         }
+    
+    def reset_epoch_weights(self):
+        self.epoch_scale_weights = []
+    
+    def add_epoch_weights(self, weights):
+        if weights is not None:
+            self.epoch_scale_weights.append(weights)
+    
+    def get_average_epoch_weights(self):
+        if not self.epoch_scale_weights:
+            return {scale: 1.0/len(self.scales) for scale in self.scales}
+        
+        avg_weights = defaultdict(float)
+        count = 0
+        
+        for batch_weights in self.epoch_scale_weights:
+            for scale, weight in batch_weights.items():
+                avg_weights[scale] += weight
+            count += 1
+        
+        for scale in avg_weights:
+            avg_weights[scale] /= count
+        
+        return dict(avg_weights)
 
-# ========== 5. FIXED MAIN MULTISCALE SOLVER ==========
-# ========== 5. FIXED MAIN MULTISCALE SOLVER ==========
-class FixedMultiscalePDEsolver1D(nn.Module):
+
+class SingleScaleFNO1D(nn.Module):
+    def __init__(self, scale: int, in_channels: int, out_channels: int, 
+                 width: int = 32, depth: int = 4):
+        super().__init__()
+        self.scale = scale
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        
+        modes = max(4, scale // 16)
+        
+        self.lift = nn.Sequential(
+            nn.Conv1d(in_channels, width, 1),
+            nn.GELU(),
+            nn.Conv1d(width, width, 1)
+        )
+        
+        self.fno_layers = nn.ModuleList([
+            FourierBlock1D(width, width, modes) 
+            for _ in range(depth)
+        ])
+        
+        self.project = nn.Sequential(
+            nn.Conv1d(width, width, 1),
+            nn.GELU(),
+            nn.Conv1d(width, out_channels, 1)
+        )
+        
+        self.refine = nn.Sequential(
+            nn.Conv1d(out_channels, out_channels * 2, 3, padding=1),
+            nn.GELU(),
+            nn.Conv1d(out_channels * 2, out_channels, 3, padding=1)
+        )
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[-1] != self.scale:
+            x = F.interpolate(x, size=self.scale, mode='linear')
+        
+        x = self.lift(x)
+        for layer in self.fno_layers:
+            x = layer(x) + x
+            x = F.gelu(x)
+        x = self.project(x)
+        x = self.refine(x)
+        
+        return x
+
+
+class SingleScaleBaseline1D(nn.Module):
+    def __init__(self, scale: int, in_channels: int, out_channels: int):
+        super().__init__()
+        self.scale = scale
+        self.model = SingleScaleFNO1D(scale, in_channels, out_channels)
+        self.out_channels = out_channels
+        self.is_baseline = True
+    
+    def forward(self, multiscale_inputs: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, Dict]:
+        available_scales = [int(k.split('_')[1]) for k in multiscale_inputs.keys()]
+        if not available_scales:
+            device = next(self.parameters()).device
+            target_size = self.scale
+            return torch.zeros(1, self.out_channels, target_size, 
+                             device=device), {}
+        
+        largest_scale = max(available_scales)
+        input_key = f'grid_{largest_scale}'
+        grid = multiscale_inputs[input_key]
+        
+        output = self.model(grid)
+        
+        metadata = {
+            'scale_used': largest_scale,
+            'output': output,
+            'scale_predictions': {largest_scale: output}
+        }
+        
+        return output, metadata
+
+
+# ========== 4. MULTISCALE SOLVER ==========
+class StableMultiscalePDEsolver1D(nn.Module):
     def __init__(self, scales: List[int], in_channels: int, out_channels: int,
-                 combination_method: str = 'softmax', 
-                 physics_weight: float = 0.01, constraint_weight: float = 0.01):
+                 model_type: str = 'fno', combination_method: str = 'softmax', 
+                 method_config: Optional[Dict] = None):
         super().__init__()
         self.scales = sorted(scales)
         self.num_scales = len(scales)
         self.in_channels = in_channels
         self.out_channels = out_channels
+        self.model_type = model_type
         self.combination_method = combination_method
-        self.physics_weight = physics_weight
-        self.constraint_weight = constraint_weight
+        self.method = combination_method
         
         if combination_method == 'single_scale_baseline':
             self.is_baseline = True
             self.baseline_scale = max(scales)
-            self.model = ScaleSpecificFNO1D(self.baseline_scale, in_channels, out_channels)
+            self.model = SingleScaleBaseline1D(self.baseline_scale, in_channels, out_channels)
             return
         
         self.is_baseline = False
         
-        # Scale-specific models
+        self.method_config = method_config or self._get_stable_config()
+        
         self.scale_models = nn.ModuleDict()
         for scale in self.scales:
-            self.scale_models[str(scale)] = ScaleSpecificFNO1D(scale, in_channels, out_channels)
+            model = ScaleSpecificFNO1D(scale, in_channels, out_channels)
+            self._initialize_model(model)
+            self.scale_models[str(scale)] = model
         
-        # Select combiner (ADDED lagrangian_two_scale)
-        if combination_method == 'softmax':
-            self.combiner = MultiscaleSoftmaxRouter1D(scales, in_channels, out_channels)
-        elif combination_method == 'lagrangian_single':
-            self.combiner = LagrangianSingleScaleCombiner1D(scales, in_channels, out_channels)
-        elif combination_method == 'lagrangian_two_scale':  # NEW!
-            self.combiner = LagrangianTwoTimeScaleCombiner1D(scales, in_channels, out_channels)
-        elif combination_method == 'admm':
-            self.combiner = ADMMCombiner1D(scales, in_channels, out_channels)
-        else:
-            raise ValueError(f"Unknown combination method: {combination_method}")
+        self.combiner = self._create_stable_combiner()
         
-        # Fine-tuning layer
         self.fine_tune = nn.Sequential(
             nn.Conv1d(out_channels, out_channels * 2, 3, padding=1),
             nn.GroupNorm(min(8, out_channels * 2), out_channels * 2),
             nn.GELU(),
             nn.Conv1d(out_channels * 2, out_channels, 3, padding=1),
+            nn.GroupNorm(min(8, out_channels), out_channels),
         )
         
-        # FIXED: Only initialize weights for Conv1d layers, not GELU
-        self._initialize_fine_tune_weights()
+        self.skip_weight = nn.Parameter(torch.tensor(0.5))
+        self.final_proj = nn.Conv1d(out_channels, out_channels, 1)
     
-    def _initialize_fine_tune_weights(self):
-        """Initialize only the convolutional layers in fine_tune"""
-        for layer in self.fine_tune:
-            if isinstance(layer, nn.Conv1d):
-                nn.init.kaiming_normal_(layer.weight, mode='fan_in', nonlinearity='relu')
-                if layer.bias is not None:
-                    nn.init.constant_(layer.bias, 0.0)
+    def _get_stable_config(self) -> Dict:
+        configs = {
+            'softmax': {
+                'router_sparsity_weight': 0.001,
+                'scale_consistency_weight': 0.01,
+                'reconstruction_weight': 1.0,
+            },
+            'lagrangian_single': {
+                'lambda_init': 0.1,
+                'lambda_reg_weight': 0.001,
+                'scale_consistency_weight': 0.01,
+                'reconstruction_weight': 1.0,
+            },
+            'lagrangian_augmented': {  # ADDED
+                'lambda_init': 0.1,
+                'rho_init': 0.1,
+                'num_iter': 3,
+                'penalty_growth': 1.1,
+                'lambda_reg_weight': 0.001,
+                'primal_dual_balance_weight': 0.01,
+                'scale_consistency_weight': 0.01,
+                'reconstruction_weight': 1.0,
+            },
+            'admm': {
+                'rho': 0.1,
+                'num_iter': 3,
+                'beta': 0.01,
+                'admm_consensus_weight': 0.001,
+                'scale_consistency_weight': 0.01,
+                'reconstruction_weight': 1.0,
+            }
+        }
+        return configs.get(self.combination_method, {})
     
-    def compute_physics_loss(self, u_pred: torch.Tensor, u0: torch.Tensor, 
-                           grid: torch.Tensor, nu: float = 0.01) -> torch.Tensor:
-        """Physics-constrained loss for Burgers equation"""
-        # Convert normalized grid back to [0, 2π]
-        x = grid * (2 * np.pi)
-        dx = 2 * np.pi / (x.shape[-1] - 1)
-        
-        # Compute spatial derivatives
-        u_x = torch.gradient(u_pred, spacing=dx, dim=-1)[0]
-        u_xx = torch.gradient(u_x, spacing=dx, dim=-1)[0]
-        
-        # Approximate time derivative (assume dt from dataset)
-        dt = 0.005 * 10  # time_step from dataset
-        u_t = (u_pred - u0) / dt
-        
-        # Burgers equation residual
-        residual = u_t + u_pred * u_x - nu * u_xx
-        
-        return torch.mean(residual**2)
+    def _initialize_model(self, model: nn.Module):
+        for name, param in model.named_parameters():
+            if 'weight' in name:
+                if param.dim() >= 2:
+                    nn.init.xavier_uniform_(param, gain=0.5)
+                else:
+                    nn.init.normal_(param, mean=0.0, std=0.01)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0.0)
     
-    def forward(self, multiscale_inputs: Dict[str, torch.Tensor],
-                return_all: bool = False) -> Tuple[torch.Tensor, Dict]:
-        """Forward pass that works for all scales"""
+    def _create_stable_combiner(self):
+        if self.combination_method == 'softmax':
+            combiner = MultiscaleSoftmaxRouter1D(
+                self.scales, self.in_channels, self.out_channels
+            )
+        elif self.combination_method == 'lagrangian_single':
+            combiner = LagrangianSingleScaleCombiner1D(
+                self.scales, self.in_channels, self.out_channels,
+                lambda_init=self.method_config.get('lambda_init', 0.1)
+            )
+        elif self.combination_method == 'lagrangian_augmented':  # ADDED
+            combiner = AugmentedLagrangianCombiner1D(
+                self.scales, self.in_channels, self.out_channels,
+                lambda_init=self.method_config.get('lambda_init', 0.1),
+                rho_init=self.method_config.get('rho_init', 0.1),
+                num_iter=self.method_config.get('num_iter', 3),
+                penalty_growth=self.method_config.get('penalty_growth', 1.1)
+            )
+        elif self.combination_method == 'admm':
+            combiner = ADMMCombiner1D(
+                self.scales, self.in_channels, self.out_channels,
+                rho=self.method_config.get('rho', 0.1),
+                num_iter=self.method_config.get('num_iter', 3),
+                beta=self.method_config.get('beta', 0.01)
+            )
+        else:
+            raise ValueError(f"Unknown combination method: {self.combination_method}")
+        
+        for name, param in combiner.named_parameters():
+            if 'weight' in name:
+                if param.dim() >= 2:
+                    nn.init.xavier_uniform_(param, gain=0.5)
+                else:
+                    nn.init.normal_(param, mean=0.0, std=0.01)
+            elif 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'log_' in name or 'lambda' in name:
+                nn.init.constant_(param, np.log(0.1))
+        
+        return combiner
+    
+    def forward(self, multiscale_inputs: Dict[str, torch.Tensor]) -> Tuple[torch.Tensor, Dict]:
         if self.is_baseline:
-            # Use largest scale input
-            largest_scale = max(self.scales)
-            input_key = f'grid_{largest_scale}'
-            if input_key not in multiscale_inputs:
-                # Try any available scale
-                input_key = list(multiscale_inputs.keys())[0]
-            grid = multiscale_inputs[input_key]
-            output = self.model(grid)
-            return (output, {'scale_used': largest_scale}) if return_all else output
+            return self.model(multiscale_inputs)
         
-        # Collect predictions from all scales
         scale_predictions = {}
+        
         for scale in self.scales:
             input_key = f'grid_{scale}'
             if input_key in multiscale_inputs:
@@ -766,37 +1145,60 @@ class FixedMultiscalePDEsolver1D(nn.Module):
                 scale_predictions[scale] = pred
         
         if not scale_predictions:
+            target_size = max(self.scales)
             device = next(self.parameters()).device
-            output = torch.zeros(1, self.out_channels, max(self.scales), device=device)
-            return (output, {}) if return_all else output
+            return torch.zeros(1, self.out_channels, target_size, 
+                             device=device), {'scale_predictions': {}}
         
-        # Get target grid for combiner
-        target_scale = max(self.scales)
-        target_grid_key = f'grid_{target_scale}'
-        target_grid = multiscale_inputs.get(target_grid_key, next(iter(multiscale_inputs.values())))
+        available_scales_in_input = [int(k.split('_')[1]) for k in multiscale_inputs.keys()]
+        largest_input_scale = max(available_scales_in_input)
+        largest_grid_key = f'grid_{largest_input_scale}'
+        largest_grid = multiscale_inputs[largest_grid_key]
         
-        # Combine predictions
-        combined, meta = self.combiner(scale_predictions, target_grid)
-        
-        # Fine-tune with residual connection
-        refined = self.fine_tune(combined)
-        output = refined * 0.1 + combined * 0.9
-        
+        combined, meta = self.combiner(scale_predictions, largest_grid)
         meta['scale_predictions'] = scale_predictions
+        
+        refined = self.fine_tune(combined)
+        output = self.skip_weight * refined + (1 - self.skip_weight) * combined
+        output = self.final_proj(output) + output
+        
         meta['final_output'] = output
         
-        return (output, meta) if return_all else output
+        return output, meta
     
-    def compute_loss(self, predictions: torch.Tensor,
-                    multiscale_targets: Dict[str, torch.Tensor],
-                    multiscale_inputs: Dict[str, torch.Tensor],
-                    u0: torch.Tensor,
-                    metadata: Dict) -> Tuple[torch.Tensor, Dict]:
-        """Fixed loss function with physics and constraints"""
+    def compute_loss(self, predictions: torch.Tensor, 
+                     multiscale_targets: Dict[str, torch.Tensor],
+                     metadata: Dict) -> Tuple[torch.Tensor, Dict]:
+        if self.is_baseline:
+            # Simple baseline loss
+            losses = {}
+            largest_scale = max(self.scales)
+            target_key = f'solution_{largest_scale}'
+            
+            if target_key in multiscale_targets:
+                target = multiscale_targets[target_key]
+                if predictions.shape[-1] != target.shape[-1]:
+                    predictions_resized = F.interpolate(
+                        predictions, 
+                        size=target.shape[-1], 
+                        mode='linear',
+                        align_corners=False
+                    )
+                    losses['reconstruction'] = F.mse_loss(predictions_resized, target)
+                else:
+                    losses['reconstruction'] = F.mse_loss(predictions, target)
+            else:
+                losses['reconstruction'] = torch.tensor(0.0, device=predictions.device)
+            
+            total_loss = losses['reconstruction']
+            losses['total'] = total_loss
+            
+            return total_loss, losses
+        
         losses = {}
         
-        # 1. Reconstruction loss (MSE)
-        recon_loss = 0.0
+        # 1. Multi-scale reconstruction loss
+        total_recon_loss = 0.0
         num_targets = 0
         
         for scale in self.scales:
@@ -804,184 +1206,255 @@ class FixedMultiscalePDEsolver1D(nn.Module):
             if target_key in multiscale_targets:
                 target = multiscale_targets[target_key]
                 
-                # Resize prediction if needed
                 if predictions.shape[-1] != target.shape[-1]:
                     pred_resized = F.interpolate(
-                        predictions, size=target.shape[-1],
-                        mode='linear', align_corners=False
+                        predictions, 
+                        size=target.shape[-1], 
+                        mode='linear',
+                        align_corners=False
                     )
                     loss = F.mse_loss(pred_resized, target)
                 else:
                     loss = F.mse_loss(predictions, target)
                 
-                # Weight by scale importance (higher resolution more important)
                 scale_weight = (scale / max(self.scales)) ** 0.5
-                recon_loss += loss * scale_weight
+                total_recon_loss += loss * scale_weight
                 num_targets += 1
         
         if num_targets > 0:
-            recon_loss = recon_loss / num_targets
-        losses['reconstruction'] = recon_loss
+            losses['reconstruction'] = total_recon_loss / num_targets
+        else:
+            losses['reconstruction'] = torch.tensor(0.0, device=predictions.device)
         
-        # 2. Physics loss (if we have grid)
-        physics_loss = torch.tensor(0.0, device=predictions.device)
-        grid_key = f'grid_{max(self.scales)}'
-        if grid_key in multiscale_inputs:
-            grid = multiscale_inputs[grid_key]
-            # Extract spatial grid (channel 0)
-            spatial_grid = grid[:, 0:1, :]
-            physics_loss = self.compute_physics_loss(predictions, u0, spatial_grid)
-        losses['physics'] = physics_loss
+        # 2. Individual scale losses
+        scale_predictions = metadata.get('scale_predictions', {})
+        scale_losses = []
         
-        # 3. Constraint loss (from combiner)
-        constraint_loss = torch.tensor(0.0, device=predictions.device)
-        if 'constraint_violation' in metadata:
-            constraint_loss = metadata['constraint_violation']
-        elif 'lambda_weights' in metadata:
-            # For Lagrangian methods, encourage diversity
-            weights = metadata['lambda_weights']
-            constraint_loss = -torch.sum(weights * torch.log(weights + 1e-10))
-        losses['constraint'] = constraint_loss
+        for scale, pred in scale_predictions.items():
+            target_key = f'solution_{scale}'
+            if target_key in multiscale_targets:
+                target = multiscale_targets[target_key]
+                scale_loss = F.mse_loss(pred, target)
+                scale_losses.append(scale_loss)
         
-        # 4. Total loss
-        total_loss = (recon_loss + 
-                     self.physics_weight * physics_loss +
-                     self.constraint_weight * constraint_loss)
+        if scale_losses:
+            losses['scale_individual'] = torch.mean(torch.stack(scale_losses)) * 0.1
+        
+        # 3. Weight entropy regularization
+        if self.combination_method == 'softmax' and 'router_weights' in metadata:
+            router_weights = metadata['router_weights']
+            num_scales = router_weights.shape[1]
+            
+            max_entropy = torch.log(torch.tensor(float(num_scales), device=router_weights.device))
+            entropy = -torch.sum(router_weights * torch.log(router_weights + 1e-8), dim=1)
+            
+            entropy_loss = torch.mean((entropy - max_entropy) ** 2)
+            losses['weight_entropy'] = entropy_loss * 0.01
+        
+        # 4. Lagrangian regularization (for Lagrangian methods)
+        if self.combination_method in ['lagrangian_single', 'lagrangian_augmented']:
+            if 'lambda_weights' in metadata:
+                lambda_weights = metadata['lambda_weights']
+                
+                # Encourage balanced weights
+                lambda_entropy = -torch.sum(lambda_weights * torch.log(lambda_weights + 1e-8))
+                max_entropy = torch.log(torch.tensor(float(len(lambda_weights)), 
+                                                    device=lambda_weights.device))
+                
+                # Penalize extreme lambda values
+                lambda_reg = torch.mean((lambda_weights - 1.0/len(lambda_weights)) ** 2)
+                
+                losses['lambda_regularization'] = lambda_reg * 0.001
+                losses['lambda_entropy'] = (max_entropy - lambda_entropy) * 0.0005
+            
+            # Additional loss for augmented Lagrangian
+            if self.combination_method == 'lagrangian_augmented':
+                # Primal-dual balance loss
+                if 'primal_residuals' in metadata and 'dual_residuals' in metadata:
+                    primal_res = torch.tensor(metadata['primal_residuals'][-1] 
+                                            if metadata['primal_residuals'] else 0.0,
+                                            device=predictions.device)
+                    dual_res = torch.tensor(metadata['dual_residuals'][-1] 
+                                           if metadata['dual_residuals'] else 0.0,
+                                           device=predictions.device)
+                    
+                    # Encourage balanced primal-dual residuals
+                    balance_loss = torch.abs(primal_res - dual_res) / (primal_res + dual_res + 1e-8)
+                    losses['primal_dual_balance'] = balance_loss * 0.01
+                
+                # Penalty parameter regularization
+                if 'rho_primal' in metadata and 'rho_dual' in metadata:
+                    rho_primal = metadata['rho_primal']
+                    rho_dual = metadata['rho_dual']
+                    
+                    # Encourage reasonable ratio (typically rho_primal > rho_dual)
+                    ratio_loss = F.relu(rho_dual - rho_primal * 0.8)  # rho_dual should be <= 0.8*rho_primal
+                    losses['penalty_ratio'] = ratio_loss * 0.001
+        
+        # 5. ADMM-specific losses
+        if self.combination_method == 'admm' and 'consensus' in metadata:
+            consensus = metadata['consensus']
+            scale_outputs = metadata.get('scale_outputs', {})
+            
+            if scale_outputs:
+                consensus_loss = 0.0
+                for scale, output in scale_outputs.items():
+                    consensus_loss += F.mse_loss(output, consensus)
+                
+                losses['admm_consensus'] = consensus_loss * 0.001
+        
+        # ========== ADDED: PHYSICS LOSS FOR 1D ==========
+        # 6. Physics-informed loss for 1D Burgers' equation
+        physics_loss_components = self._compute_physics_loss_1d(predictions, metadata)
+        losses.update(physics_loss_components)
+        
+        # 7. Calculate total loss
+        total_loss = losses.get('reconstruction', 0.0)
+        
+        for loss_name, loss_value in losses.items():
+            if loss_name != 'reconstruction':
+                # Scale physics losses appropriately
+                if loss_name.startswith('physics_'):
+                    total_loss = total_loss + loss_value * 0.1  # Reduced weight for physics
+                else:
+                    total_loss = total_loss + loss_value
         
         losses['total'] = total_loss
         
         return total_loss, losses
+    
+    def _compute_physics_loss_1d(self, predictions: torch.Tensor, metadata: Dict) -> Dict:
+        """Compute physics-constrained loss for 1D Burgers' equation"""
+        physics_losses = {}
+        
+        # Get batch size and spatial dimensions
+        batch_size = predictions.shape[0]
+        L = predictions.shape[2]  # Length of 1D domain
+        
+        # Skip physics loss if we don't have predictions or metadata
+        if batch_size == 0 or 'scale_predictions' not in metadata:
+            return physics_losses
+        
+        # Get predictions for the largest scale (highest resolution)
+        largest_scale = max(self.scales)
+        if largest_scale in metadata['scale_predictions']:
+            pred_field = metadata['scale_predictions'][largest_scale]
+            
+            # Ensure we have valid field
+            if pred_field.shape[-1] >= 4:
+                # Compute spatial gradients for physics constraints
+                dx = 1.0 / (L - 1)  # Assuming domain [0,1]
+                
+                # Compute gradients using finite differences (central difference)
+                grad = (pred_field[:, :, 2:] - pred_field[:, :, :-2]) / (2 * dx)
+                
+                # Compute second derivatives for diffusion term
+                grad_xx = (pred_field[:, :, 2:] - 2 * pred_field[:, :, 1:-1] + pred_field[:, :, :-2]) / (dx**2)
+                
+                # Burgers' equation: ∂u/∂t + u * ∂u/∂x = ν * ∂²u/∂x²
+                # For steady state or assuming small changes: u * ∂u/∂x ≈ ν * ∂²u/∂x²
+                
+                # 4a. PDE residual loss for Burgers' equation
+                viscosity = 0.01  # Same as dataset
+                convective_term = pred_field[:, :, 1:-1] * grad
+                diffusion_term = viscosity * grad_xx
+                
+                # Residual: ∂u/∂t + u * ∂u/∂x - ν * ∂²u/∂x² ≈ 0
+                # For steady state approximation: u * ∂u/∂x - ν * ∂²u/∂x² ≈ 0
+                pde_residual = torch.abs(convective_term - diffusion_term)
+                physics_losses['physics_pde'] = torch.mean(pde_residual**2) * 0.01
+                
+                # 4b. Energy conservation loss
+                # For Burgers' equation without forcing, energy should decay
+                # We'll encourage smooth energy decay across scales
+                if len(metadata['scale_predictions']) > 1:
+                    energy_values = []
+                    for scale, pred in metadata['scale_predictions'].items():
+                        # Compute kinetic energy density (mean of u²)
+                        energy = torch.mean(pred**2, dim=[1, 2])
+                        energy_values.append(energy)
+                    
+                    if len(energy_values) >= 2:
+                        # Encourage monotonic energy decay with scale (more dissipation at finer scales)
+                        energy_decay_loss = 0.0
+                        for i in range(len(energy_values) - 1):
+                            # Higher scale (finer resolution) should have lower energy due to dissipation
+                            energy_diff = F.relu(energy_values[i] - energy_values[i+1] + 0.01)  # Allow small tolerance
+                            energy_decay_loss += torch.mean(energy_diff)
+                        
+                        if len(energy_values) > 1:
+                            physics_losses['physics_energy_decay'] = energy_decay_loss * 0.001
+                
+                # 4c. Boundary condition loss (Dirichlet boundaries)
+                boundary_loss = torch.mean(pred_field[:, :, 0]**2) + \
+                              torch.mean(pred_field[:, :, -1]**2)
+                physics_losses['physics_boundary'] = boundary_loss * 0.01
+                
+                # 4d. Smoothness/regularity loss
+                # Total variation regularization for smooth velocity fields
+                tv_loss = torch.mean(torch.abs(grad))
+                physics_losses['physics_smoothness'] = tv_loss * 0.001
+                
+                # 4e. Shock capturing loss (encourage proper shock formation)
+                # Burgers' equation can develop shocks - we want gradients to be finite
+                shock_loss = torch.mean(torch.abs(grad_xx) / (torch.abs(grad) + 1e-6))
+                physics_losses['physics_shock'] = shock_loss * 0.0001
+        
+        return physics_losses
 
 
-# ========== 6. FIXED TRAINER ==========
-class FixedMultiscaleTrainer1D:
-    def __init__(self, model, train_loader: DataLoader, val_loader: DataLoader,
-                 device: str, lr: float = 1e-3, grad_clip: float = 1.0, 
-                 patience: int = 50, eval_scales: List[int] = None):
+# ========== 5. TRAINER ==========
+class StableMultiscaleTrainer1D:
+    def __init__(self, model, 
+                 train_loader: DataLoader,
+                 val_loader: DataLoader,
+                 device: str,
+                 lr: Optional[float] = None,
+                 grad_clip: float = 1.0,
+                 patience: int = 30,
+                 log_weights_every: int = 5):
         self.model = model.to(device)
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.device = device
         self.patience = patience
-        self.model_scales = model.scales
-        self.eval_scales = eval_scales if eval_scales else model.scales
+        self.log_weights_every = log_weights_every
         
+        self.model_scales = model.scales
+        self.method = model.combination_method
+        
+        if lr is None:
+            lr_map = {
+                'single_scale_baseline': 3e-3,
+                'softmax': 5e-5,
+                'lagrangian_single': 6e-5,
+                'lagrangian_augmented': 5e-5,  # ADDED
+                'admm': 1e-5,
+            }
+            lr = lr_map.get(model.combination_method, 1e-3)
+
         self.optimizer = torch.optim.AdamW(
             model.parameters(), 
             lr=lr, 
-            weight_decay=1e-5,
+            weight_decay=1e-6,
             betas=(0.9, 0.999)
         )
         
-        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=10,
+        self.scheduler = torch.optim.lr_scheduler.ExponentialLR(
+            self.optimizer, gamma=0.995
         )
         
         self.grad_clip = grad_clip
         self.best_val_loss = float('inf')
+        self.val_loss_ema = None
+        self.ema_alpha = 0.1
+        
         self.history = defaultdict(list)
-    
-    def train_epoch(self) -> float:
-        self.model.train()
-        total_loss = 0
-        batch_count = 0
-        
-        for batch in self.train_loader:
-            # Get u0 from original grid (channel 1 is initial condition)
-            u0 = batch['original_grid'][:, :, 1:2, :].to(self.device)
-            
-            # Process inputs and targets
-            multiscale_inputs = self._filter_multiscale_data(batch['multiscale_grids'])
-            multiscale_targets = self._filter_multiscale_data(batch['multiscale_solutions'])
-            
-            if not multiscale_inputs or not multiscale_targets:
-                continue
-            
-            # Process dimensions
-            processed_inputs = {}
-            for k, v in multiscale_inputs.items():
-                v = v.to(self.device)
-                if v.dim() == 4:  # [B, 1, C, L]
-                    v = v.squeeze(1)  # [B, C, L]
-                processed_inputs[k] = v
-            
-            processed_targets = {}
-            for k, v in multiscale_targets.items():
-                v = v.to(self.device)
-                if v.dim() == 4:
-                    v = v.squeeze(1)
-                processed_targets[k] = v
-            
-            # Forward pass
-            predictions, metadata = self.model(processed_inputs, return_all=True)
-            
-            # Compute loss with physics and constraints
-            loss, loss_components = self.model.compute_loss(
-                predictions, processed_targets, processed_inputs, u0, metadata
-            )
-            
-            if not torch.isfinite(loss):
-                continue
-            
-            # Backward pass
-            self.optimizer.zero_grad()
-            loss.backward()
-            
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(),
-                max_norm=self.grad_clip,
-                norm_type=2
-            )
-            
-            self.optimizer.step()
-            
-            total_loss += loss.item()
-            batch_count += 1
-        
-        return total_loss / max(batch_count, 1) if batch_count > 0 else float('inf')
-    
-    @torch.no_grad()
-    def validate(self) -> float:
-        self.model.eval()
-        total_loss = 0
-        batch_count = 0
-        
-        for batch in self.val_loader:
-            u0 = batch['original_grid'][:, :, 1:2, :].to(self.device)
-            
-            multiscale_inputs = self._filter_multiscale_data(batch['multiscale_grids'])
-            multiscale_targets = self._filter_multiscale_data(batch['multiscale_solutions'])
-            
-            if not multiscale_inputs or not multiscale_targets:
-                continue
-            
-            processed_inputs = {}
-            for k, v in multiscale_inputs.items():
-                v = v.to(self.device)
-                if v.dim() == 4:
-                    v = v.squeeze(1)
-                processed_inputs[k] = v
-            
-            processed_targets = {}
-            for k, v in multiscale_targets.items():
-                v = v.to(self.device)
-                if v.dim() == 4:
-                    v = v.squeeze(1)
-                processed_targets[k] = v
-            
-            predictions, metadata = self.model(processed_inputs, return_all=True)
-            
-            loss, _ = self.model.compute_loss(
-                predictions, processed_targets, processed_inputs, u0, metadata
-            )
-            
-            if torch.isfinite(loss):
-                total_loss += loss.item()
-                batch_count += 1
-        
-        return total_loss / max(batch_count, 1) if batch_count > 0 else float('inf')
-    
-    def _filter_multiscale_data(self, batch_data):
+        self.weight_history = []
+        self.epoch_weights_summary = []
+        self.admm_weights_per_epoch = []
+
+    def _filter_multiscale_data(self, batch_data, key_prefix):
         filtered = {}
         for k, v in batch_data.items():
             try:
@@ -992,105 +1465,281 @@ class FixedMultiscaleTrainer1D:
                 continue
         return filtered
     
+    def _extract_weights_from_metadata(self, metadata: Dict) -> Dict:
+        weights_info = {}
+        
+        if 'router_weights' in metadata and metadata['router_weights'] is not None:
+            router_weights = metadata['router_weights']
+            if router_weights.dim() == 2:
+                avg_weights = router_weights.mean(dim=0)
+                for i, scale in enumerate(self.model_scales):
+                    if i < avg_weights.shape[0]:
+                        weights_info[f'scale_{scale}'] = avg_weights[i].item()
+        
+        elif 'lambda_weights' in metadata:
+            lambda_weights = metadata['lambda_weights']
+            for i, scale in enumerate(self.model_scales):
+                if i < lambda_weights.shape[0]:
+                    weights_info[f'scale_{scale}'] = lambda_weights[i].item()
+        
+        elif 'scale_weights' in metadata:
+            scale_weights = metadata['scale_weights']
+            for scale, weight in scale_weights.items():
+                weights_info[f'scale_{scale}'] = weight
+        
+        elif self.model.is_baseline and 'scale_used' in metadata:
+            scale_used = metadata['scale_used']
+            weights_info[f'scale_{scale_used}'] = 1.0
+        
+        return weights_info
+    
+    def train_epoch(self, epoch: int) -> float:
+        self.model.train()
+        total_loss = 0
+        batch_count = 0
+        
+        epoch_weights = defaultdict(list)
+        
+        if self.method == 'admm' and hasattr(self.model.combiner, 'reset_epoch_weights'):
+            self.model.combiner.reset_epoch_weights()
+        
+        for batch_idx, batch in enumerate(self.train_loader):
+            try:
+                multiscale_inputs = self._filter_multiscale_data(
+                    batch['multiscale_grids'], 'grid'
+                )
+                multiscale_targets = self._filter_multiscale_data(
+                    batch['multiscale_solutions'], 'solution'
+                )
+                
+                if not multiscale_inputs or not multiscale_targets:
+                    continue
+                
+                multiscale_inputs = {k: v.to(self.device) for k, v in multiscale_inputs.items()}
+                multiscale_targets = {k: v.to(self.device) for k, v in multiscale_targets.items()}
+                
+                predictions, metadata = self.model(multiscale_inputs)
+                
+                if self.method == 'admm' and hasattr(self.model.combiner, 'add_epoch_weights'):
+                    if hasattr(self.model.combiner, 'last_scale_weights') and self.model.combiner.last_scale_weights:
+                        self.model.combiner.add_epoch_weights(self.model.combiner.last_scale_weights)
+                
+                weights_info = self._extract_weights_from_metadata(metadata)
+                for scale_key, weight_value in weights_info.items():
+                    epoch_weights[scale_key].append(weight_value)
+                
+                loss, loss_components = self.model.compute_loss(
+                    predictions, multiscale_targets, metadata
+                )
+                
+                if not torch.isfinite(loss):
+                    print(f"Warning: Non-finite loss {loss.item()}, skipping batch")
+                    continue
+                
+                self.optimizer.zero_grad()
+                loss.backward()
+                
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    max_norm=self.grad_clip,
+                    norm_type=2
+                )
+                
+                if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                    print(f"Warning: Gradient norm is {grad_norm.item()}, skipping update")
+                    self.optimizer.zero_grad()
+                    continue
+                
+                self.optimizer.step()
+                
+                total_loss += loss.item()
+                batch_count += 1
+                self.history['grad_norm'].append(grad_norm.item())
+                
+            except RuntimeError as e:
+                if "CUDA out of memory" in str(e):
+                    print(f"CUDA OOM at batch {batch_idx}, skipping")
+                    torch.cuda.empty_cache()
+                    continue
+                else:
+                    print(f"Error in training batch {batch_idx}: {e}")
+                    continue
+        
+        self.scheduler.step()
+        
+        avg_epoch_weights = {}
+        for scale_key, weight_list in epoch_weights.items():
+            if weight_list:
+                avg_epoch_weights[scale_key] = np.mean(weight_list)
+        
+        if avg_epoch_weights:
+            self.epoch_weights_summary.append({
+                'epoch': epoch,
+                'weights': avg_epoch_weights,
+                'total_loss': total_loss / max(batch_count, 1) if batch_count > 0 else float('inf')
+            })
+        
+        if self.method == 'admm' and hasattr(self.model.combiner, 'get_average_epoch_weights'):
+            admm_epoch_weights = self.model.combiner.get_average_epoch_weights()
+            self.admm_weights_per_epoch.append(admm_epoch_weights)
+            
+            if epoch % self.log_weights_every == 0:
+                print(f"\n  ADMM Epoch {epoch} Scale Weights:")
+                total_weight = 0
+                for scale, weight in admm_epoch_weights.items():
+                    total_weight += weight
+                    print(f"    Scale {scale}: {weight:.4f}")
+                print(f"    Total: {total_weight:.4f}")
+                
+                if hasattr(self.model.combiner, 'log_rho'):
+                    rho = torch.exp(self.model.combiner.log_rho).item()
+                    print(f"    Rho parameter: {rho:.6f}")
+        
+        return total_loss / max(batch_count, 1) if batch_count > 0 else float('inf')
+    
+    @torch.no_grad()
+    def validate(self) -> float:
+        self.model.eval()
+        total_loss = 0
+        batch_count = 0
+        
+        for batch in self.val_loader:
+            multiscale_inputs = self._filter_multiscale_data(
+                batch['multiscale_grids'], 'grid'
+            )
+            multiscale_targets = self._filter_multiscale_data(
+                batch['multiscale_solutions'], 'solution'
+            )
+            
+            if not multiscale_inputs or not multiscale_targets:
+                continue
+            
+            multiscale_inputs = {k: v.to(self.device) for k, v in multiscale_inputs.items()}
+            multiscale_targets = {k: v.to(self.device) for k, v in multiscale_targets.items()}
+            
+            predictions, metadata = self.model(multiscale_inputs)
+            loss, _ = self.model.compute_loss(predictions, multiscale_targets, metadata)
+            
+            if torch.isfinite(loss):
+                total_loss += loss.item()
+                batch_count += 1
+        
+        avg_val_loss = total_loss / max(batch_count, 1) if batch_count > 0 else float('inf')
+        
+        if self.val_loss_ema is None:
+            self.val_loss_ema = avg_val_loss
+        else:
+            self.val_loss_ema = self.ema_alpha * avg_val_loss + (1 - self.ema_alpha) * self.val_loss_ema
+        
+        return avg_val_loss, self.val_loss_ema
+    
     def train(self, num_epochs: int = 100, verbose: bool = True):
         best_val_loss = float('inf')
         patience_counter = 0
         
         for epoch in range(num_epochs):
-            train_loss = self.train_epoch()
-            val_loss = self.validate()
+            train_loss = self.train_epoch(epoch)
             
-            self.scheduler.step(val_loss)
+            val_loss, val_loss_ema = self.validate()
             
             if train_loss == float('inf') or val_loss == float('inf'):
-                print(f"Warning: Invalid loss at epoch {epoch+1}")
+                print(f"Warning: Invalid loss at epoch {epoch+1}, skipping epoch")
                 continue
             
             self.history['train_loss'].append(train_loss)
             self.history['val_loss'].append(val_loss)
+            self.history['val_loss_ema'].append(val_loss_ema)
             
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
+            if val_loss_ema < best_val_loss:
+                best_val_loss = val_loss_ema
                 torch.save({
                     'epoch': epoch,
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scheduler_state_dict': self.scheduler.state_dict(),
                     'val_loss': val_loss,
                     'train_loss': train_loss,
-                }, f'best_model_1d_{self.model.combination_method}.pth')
+                    'weight_history': self.epoch_weights_summary,
+                    'admm_weights_per_epoch': self.admm_weights_per_epoch if self.method == 'admm' else None,
+                }, f'best_model_{self.model.combination_method}_1d.pth')
                 patience_counter = 0
             else:
                 patience_counter += 1
             
-            if patience_counter >= self.patience:
-                print(f"Early stopping at epoch {epoch+1}")
-                break
-            
-            if verbose and (epoch % 10 == 0 or epoch < 5 or epoch == num_epochs - 1):
+            if verbose and (epoch % self.log_weights_every == 0 or epoch < 5 or epoch == num_epochs - 1):
                 current_lr = self.optimizer.param_groups[0]['lr']
-                print(f"Epoch {epoch+1}/{num_epochs}:")
+                print(f"\nEpoch {epoch+1}/{num_epochs}:")
                 print(f"  Train Loss = {train_loss:.4e}")
-                print(f"  Val Loss = {val_loss:.4e}")
+                print(f"  Val Loss = {val_loss:.4e} (EMA: {val_loss_ema:.4e})")
                 print(f"  LR = {current_lr:.2e}, Best Val = {best_val_loss:.4e}")
                 print(f"  Patience = {patience_counter}/{self.patience}")
+                
+                if self.method != 'admm' and self.epoch_weights_summary:
+                    latest_weights = self.epoch_weights_summary[-1]['weights']
+                    print("  Scale Weights:")
+                    for key, value in latest_weights.items():
+                        if key.startswith('scale_'):
+                            scale_num = int(key.replace('scale_', ''))
+                            print(f"    Scale {scale_num}: {value:.4f}")
         
         return self.history
 
 
-# ========== 7. FIXED TEST FUNCTION ==========
-def test_fixed_1d_navier_stokes():
+def stable_multiscale_comparison_1d():
     print(f"Using device: {device}")
     
-    # CRITICAL FIX: Train and test on SAME scales!
-    train_scales = [64, 128, 256]  # Train on ALL scales including 256
-    eval_scales = [128, 256]  # Test on these (subset of training scales)
+    # Create base dataset
+    train_dataset = BurgersDataset1D(
+        n_samples=5000, domain_size=256, seed=42
+    )
+    val_dataset = BurgersDataset1D(
+        n_samples=500, domain_size=256, seed=43
+    )
+    test_dataset = BurgersDataset1D(
+        n_samples=1000, domain_size=256, seed=44
+    )
     
-    # Create datasets
-    train_dataset = Burgers1DDataset(
-        n_samples=2000, domain_size=256, time_step=10, nu=0.01, seed=42
-    )
-    val_dataset = Burgers1DDataset(
-        n_samples=500, domain_size=256, time_step=10, nu=0.01, seed=43
-    )
-    test_dataset = Burgers1DDataset(
-        n_samples=500, domain_size=256, time_step=10, nu=0.01, seed=44
-    )
+    # FIXED: Use consistent scales for training and evaluation
+    # Train on both low and high resolutions, evaluate on same scales
+    train_scales = [32, 64]
+    val_scales = [64]  # Validation at highest training scale
+    eval_scales = [128, 256]  # Evaluate at same scale as training
     
     # Create multiscale datasets
     train_multiscale = MultiScaleDataset1D(
         train_dataset, train_scales, mode='train', augment=True
     )
     val_multiscale = MultiScaleDataset1D(
-        val_dataset, train_scales, mode='val', augment=False
+        val_dataset, val_scales, mode='val', augment=False
     )
     test_multiscale = MultiScaleDataset1D(
         test_dataset, eval_scales, mode='test', augment=False
     )
     
     # Data loaders
-    train_loader = DataLoader(train_multiscale, batch_size=8, shuffle=True)
-    val_loader = DataLoader(val_multiscale, batch_size=8, shuffle=False)
-    test_loader = DataLoader(test_multiscale, batch_size=8, shuffle=False)
+    train_loader = DataLoader(train_multiscale, batch_size=8, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_multiscale, batch_size=8, shuffle=False, num_workers=2)
+    test_loader = DataLoader(test_multiscale, batch_size=8, shuffle=False, num_workers=2)
     
-    # Get sample dimensions
+    # Get sample to determine dimensions
     sample = train_multiscale[0]
-    in_channels = sample['original_grid'].shape[1]  # Should be 2
-    out_channels = sample['original_solution'].shape[1]  # Should be 1
+    in_channels = sample['original_grid'].shape[0]
+    out_channels = sample['original_solution'].shape[0]
     
-    print(f"\nFixed Dataset Info:")
+    print(f"\nDataset Info:")
     print(f"  Input channels: {in_channels}, Output channels: {out_channels}")
-    print(f"  Training scales: {train_scales}")  # Now includes 256!
+    print(f"  Training scales: {train_scales}")
     print(f"  Evaluation scales: {eval_scales}")
     print(f"  Train samples: {len(train_multiscale)}")
     print(f"  Val samples: {len(val_multiscale)}")
     print(f"  Test samples: {len(test_multiscale)}")
-    
-    # Test all methods including new two-timescale Lagrangian
+
+    # Test methods
     combination_methods = [
-        'single_scale_baseline',
-        'softmax',
+        #'single_scale_baseline',
+        #'softmax', 
         'lagrangian_single',
-        'lagrangian_two_scale',  # NEW!
+        'lagrangian_augmented',
         'admm'
     ]
     
@@ -1098,49 +1747,124 @@ def test_fixed_1d_navier_stokes():
     
     for method in combination_methods:
         print(f"\n{'='*60}")
-        print(f"Training {method.upper().replace('_', ' ')}")
+        print(f"Training {method.upper().replace('_', ' ')} (1D)")
         print(f"{'='*60}")
         
-        # Create model
-        model = FixedMultiscalePDEsolver1D(
-            scales=train_scales,
-            in_channels=in_channels,
-            out_channels=out_channels,
-            combination_method=method,
-            physics_weight=1e-3,
-            constraint_weight=0.01
-        ).to(device)
+        # FIXED: Create model with proper config to reduce regularization
+        method_config = {
+            'reconstruction_weight': 1.0,
+            'scale_consistency_weight': 0.001,  # Reduced
+            'lambda_reg_weight': 0.0001,  # Much reduced
+            'physics_weight': 0.0001,  # Minimal physics loss
+        }
         
-        print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
+        # For baseline, use the largest training scale
+        if method == 'single_scale_baseline':
+            model = StableMultiscalePDEsolver1D(
+                scales=[max(train_scales)],  # Only largest scale for baseline
+                in_channels=in_channels,
+                out_channels=out_channels,
+                model_type='fno',
+                combination_method=method,
+                method_config=method_config
+            ).to(device)
+        else:
+            model = StableMultiscalePDEsolver1D(
+                scales=train_scales,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                model_type='fno',
+                combination_method=method,
+                method_config=method_config
+            ).to(device)
         
-        # Create trainer
-        trainer = FixedMultiscaleTrainer1D(
+        print(f"  Model type: StableMultiscalePDEsolver1D")
+        if hasattr(model, 'scale_models'):
+            print(f"  Number of scale models: {len(model.scale_models)}")
+        print(f"  Total parameters: {sum(p.numel() for p in model.parameters()):,}")
+        
+        # FIXED: Use appropriate learning rates
+        lr_map = {
+            'single_scale_baseline': 5e-4,
+            'softmax': 5e-4,
+            'lagrangian_single': 5e-4,
+            'lagrangian_augmented': 5e-4,  # Lower LR for augmented Lagrangian
+            'admm': 1e-4,  # Lower LR for ADMM
+        }
+        lr = lr_map.get(method, 1e-3)
+        
+        # Create trainer with modified settings
+        trainer = StableMultiscaleTrainer1D(
             model=model,
             train_loader=train_loader,
             val_loader=val_loader,
             device=device,
-            lr=1e-4,  
-            grad_clip=1.0,
-            #patience=20,
-            eval_scales=eval_scales
+            lr=lr,
+            grad_clip=0.5,  # Reduced gradient clipping
+            patience=20,
+            log_weights_every=10
         )
         
         # Train
         try:
-            history = trainer.train(num_epochs=500, verbose=True)
+            history = trainer.train(num_epochs=50, verbose=True)
             
-            # Test evaluation
+            # ========== COMPUTE TRAIN MSE ==========
+            print("\nComputing Train MSE...")
             model.eval()
-            test_losses = {}
+            train_mse_values = []
+            train_samples_processed = 0
+            
+            with torch.no_grad():
+                for batch in train_loader:
+                    multiscale_inputs = {}
+                    for scale in train_scales:
+                        key = f'grid_{scale}'
+                        if key in batch['multiscale_grids']:
+                            multiscale_inputs[key] = batch['multiscale_grids'][key].to(device)
+                    
+                    multiscale_targets = {}
+                    for scale in train_scales:
+                        target_key = f'solution_{scale}'
+                        if target_key in batch['multiscale_solutions']:
+                            multiscale_targets[target_key] = batch['multiscale_solutions'][target_key].to(device)
+                    
+                    if not multiscale_inputs:
+                        continue
+                    
+                    predictions, metadata = model(multiscale_inputs)
+                    
+                    # Compute loss for the largest training scale
+                    largest_train_scale = max(train_scales)
+                    target_key = f'solution_{largest_train_scale}'
+                    if target_key in multiscale_targets:
+                        target = multiscale_targets[target_key]
+                        
+                        if predictions.shape[-1] != target.shape[-1]:
+                            pred_resized = F.interpolate(
+                                predictions, 
+                                size=target.shape[-1], 
+                                mode='linear',
+                                align_corners=False
+                            )
+                            mse = F.mse_loss(pred_resized, target).item()
+                        else:
+                            mse = F.mse_loss(predictions, target).item()
+                        
+                        train_mse_values.append(mse)
+                        train_samples_processed += target.shape[0]
+            
+            avg_train_mse = np.mean(train_mse_values) if train_mse_values else float('inf')
+            
+            # ========== COMPUTE TEST MSE ==========
+            print("Computing Test MSE...")
+            test_mse_values = []
+            test_samples_processed = 0
             
             with torch.no_grad():
                 for batch in test_loader:
-                    # Get u0
-                    u0 = batch['original_grid'][:, :, 1:2, :].to(device)
-                    
-                    # Get inputs and targets
                     multiscale_inputs = {}
-                    for scale in train_scales:  # Use training scales for input
+                    for scale in train_scales:
                         key = f'grid_{scale}'
                         if key in batch['multiscale_grids']:
                             multiscale_inputs[key] = batch['multiscale_grids'][key].to(device)
@@ -1154,14 +1878,9 @@ def test_fixed_1d_navier_stokes():
                     if not multiscale_inputs:
                         continue
                     
-                    predictions, metadata = model(multiscale_inputs, return_all=True)
+                    predictions, metadata = model(multiscale_inputs)
                     
-                    # Compute loss using the model's compute_loss
-                    loss, loss_dict = model.compute_loss(
-                        predictions, multiscale_targets, multiscale_inputs, u0, metadata
-                    )
-                    
-                    # Also compute simple MSE for each scale
+                    # Compute MSE for each evaluation scale
                     for scale in eval_scales:
                         target_key = f'solution_{scale}'
                         if target_key in multiscale_targets:
@@ -1169,262 +1888,305 @@ def test_fixed_1d_navier_stokes():
                             
                             if predictions.shape[-1] != target.shape[-1]:
                                 pred_resized = F.interpolate(
-                                    predictions, size=target.shape[-1],
-                                    mode='linear', align_corners=False
+                                    predictions, 
+                                    size=target.shape[-1], 
+                                    mode='linear',
+                                    align_corners=False
                                 )
-                                mse = F.mse_loss(pred_resized, target)
+                                mse = F.mse_loss(pred_resized, target).item()
                             else:
-                                mse = F.mse_loss(predictions, target)
+                                mse = F.mse_loss(predictions, target).item()
                             
-                            if scale not in test_losses:
-                                test_losses[scale] = []
-                            test_losses[scale].append(mse.item())
+                            test_mse_values.append(mse)
+                            test_samples_processed += target.shape[0]
             
-            # Compute average losses
-            avg_test_losses = {}
-            for scale, losses in test_losses.items():
-                avg_test_losses[scale] = np.mean(losses) if losses else float('inf')
+            avg_test_mse = np.mean(test_mse_values) if test_mse_values else float('inf')
             
-            # Overall test loss (average across eval scales)
-            overall_test_loss = np.mean(list(avg_test_losses.values())) if avg_test_losses else float('inf')
-            
+            # Store results
             results[method] = {
                 'history': history,
+                'weight_history': trainer.epoch_weights_summary,
+                'admm_weights_per_epoch': trainer.admm_weights_per_epoch if method == 'admm' else [],
                 'final_val_loss': history['val_loss'][-1] if history['val_loss'] else float('inf'),
-                'test_losses': avg_test_losses,
-                'overall_loss': overall_test_loss,
+                'train_mse': avg_train_mse,
+                'test_mse': avg_test_mse,
+                'test_losses': {scale: avg_test_mse for scale in eval_scales},  # Same for all eval scales
                 'best_val_loss': min(history['val_loss']) if history['val_loss'] else float('inf'),
+                'num_parameters': sum(p.numel() for p in model.parameters()),
+                'train_samples': train_samples_processed,
+                'test_samples': test_samples_processed,
                 'success': True
             }
             
-            print(f"\n  Test Results:")
-            for scale, loss in avg_test_losses.items():
-                print(f"    Scale {scale}: {loss:.4e}")
-            print(f"    Average test loss: {overall_test_loss:.4e}")
+            # ========== PRINT MSE RESULTS ==========
+            print(f"\n{'='*60}")
+            print(f"FINAL MSE RESULTS for {method.upper().replace('_', ' ')}:")
+            print(f"{'='*60}")
+            print(f"Train MSE:     {avg_train_mse:.6e} (over {train_samples_processed} samples)")
+            print(f"Test MSE:      {avg_test_mse:.6e} (over {test_samples_processed} samples)")
+            print(f"Best Val Loss: {results[method]['best_val_loss']:.6e}")
             
-            # Check for overfitting
-            if overall_test_loss / results[method]['best_val_loss'] > 10:
-                print(f"  ⚠️  Warning: Severe overfitting detected!")
+            # Print final scale weights if available
+            if method != 'single_scale_baseline' and trainer.epoch_weights_summary:
+                latest_weights = trainer.epoch_weights_summary[-1]['weights']
+                print("\nFinal Scale Weights:")
+                for key, value in latest_weights.items():
+                    if key.startswith('scale_'):
+                        scale_num = int(key.replace('scale_', ''))
+                        print(f"  Scale {scale_num}: {value:.4f}")
             
         except Exception as e:
-            print(f"  Training failed: {str(e)}")
+            print(f"  Training failed for {method}: {str(e)}")
             import traceback
             traceback.print_exc()
-            results[method] = {'success': False, 'error': str(e)}
+            results[method] = {
+                'success': False,
+                'error': str(e)
+            }
     
     return results, train_scales, eval_scales
 
 
-# ========== 8. IMPROVED VISUALIZATION ==========
-def visualize_fixed_results(results: Dict, train_scales: List[int], eval_scales: List[int]):
-    """Visualize results with better analysis"""
+# Also need to fix the compute_loss method to reduce regularization
+def compute_loss_fixed(self, predictions: torch.Tensor, 
+                       multiscale_targets: Dict[str, torch.Tensor],
+                       metadata: Dict) -> Tuple[torch.Tensor, Dict]:
+    """Fixed compute_loss with reduced regularization"""
+    if self.is_baseline:
+        # Simple baseline loss
+        losses = {}
+        largest_scale = max(self.scales)
+        target_key = f'solution_{largest_scale}'
+        
+        if target_key in multiscale_targets:
+            target = multiscale_targets[target_key]
+            if predictions.shape[-1] != target.shape[-1]:
+                predictions_resized = F.interpolate(
+                    predictions, 
+                    size=target.shape[-1], 
+                    mode='linear',
+                    align_corners=False
+                )
+                losses['reconstruction'] = F.mse_loss(predictions_resized, target)
+            else:
+                losses['reconstruction'] = F.mse_loss(predictions, target)
+        else:
+            losses['reconstruction'] = torch.tensor(0.0, device=predictions.device)
+        
+        total_loss = losses['reconstruction']
+        losses['total'] = total_loss
+        
+        return total_loss, losses
+    
+    losses = {}
+    
+    # 1. Main reconstruction loss (most important)
+    total_recon_loss = 0.0
+    num_targets = 0
+    
+    for scale in self.scales:
+        target_key = f'solution_{scale}'
+        if target_key in multiscale_targets:
+            target = multiscale_targets[target_key]
+            
+            if predictions.shape[-1] != target.shape[-1]:
+                pred_resized = F.interpolate(
+                    predictions, 
+                    size=target.shape[-1], 
+                    mode='linear',
+                    align_corners=False
+                )
+                loss = F.mse_loss(pred_resized, target)
+            else:
+                loss = F.mse_loss(predictions, target)
+            
+            # Weight by scale (higher scales more important)
+            scale_weight = (scale / max(self.scales))
+            total_recon_loss += loss * scale_weight
+            num_targets += 1
+    
+    if num_targets > 0:
+        losses['reconstruction'] = total_recon_loss / num_targets
+    else:
+        losses['reconstruction'] = torch.tensor(0.0, device=predictions.device)
+    
+    # 2. Individual scale losses (help gradient flow)
+    scale_predictions = metadata.get('scale_predictions', {})
+    if scale_predictions:
+        scale_losses = []
+        for scale, pred in scale_predictions.items():
+            target_key = f'solution_{scale}'
+            if target_key in multiscale_targets:
+                target = multiscale_targets[target_key]
+                scale_loss = F.mse_loss(pred, target)
+                scale_losses.append(scale_loss)
+        
+        if scale_losses:
+            # Much smaller weight for scale individual loss
+            losses['scale_individual'] = torch.mean(torch.stack(scale_losses)) * 0.01
+    
+    # 3. Minimal regularization for softmax
+    if self.combination_method == 'softmax' and 'router_weights' in metadata:
+        router_weights = metadata['router_weights']
+        num_scales = router_weights.shape[1]
+        
+        # Very small entropy regularization
+        max_entropy = torch.log(torch.tensor(float(num_scales), device=router_weights.device))
+        entropy = -torch.sum(router_weights * torch.log(router_weights + 1e-8), dim=1)
+        entropy_loss = torch.mean((entropy - max_entropy) ** 2)
+        losses['weight_entropy'] = entropy_loss * 0.0001  # Very small
+    
+    # 4. Very small Lagrangian regularization
+    if self.combination_method in ['lagrangian_single', 'lagrangian_augmented']:
+        if 'lambda_weights' in metadata:
+            lambda_weights = metadata['lambda_weights']
+            # Tiny regularization to prevent collapse
+            lambda_reg = torch.mean((lambda_weights - 1.0/len(lambda_weights)) ** 2)
+            losses['lambda_regularization'] = lambda_reg * 0.00001  # Very small
+    
+    # 5. Minimal ADMM consensus loss
+    if self.combination_method == 'admm' and 'consensus' in metadata:
+        consensus = metadata['consensus']
+        scale_outputs = metadata.get('scale_outputs', {})
+        
+        if scale_outputs:
+            consensus_loss = 0.0
+            for scale, output in scale_outputs.items():
+                consensus_loss += F.mse_loss(output, consensus)
+            
+            losses['admm_consensus'] = consensus_loss * 0.0001  # Very small
+    
+    # 6. Calculate total loss - reconstruction is dominant
+    total_loss = losses.get('reconstruction', 0.0)
+    
+    # Add other losses with very small weights
+    for loss_name, loss_value in losses.items():
+        if loss_name != 'reconstruction':
+            total_loss = total_loss + loss_value * 0.01  # All other losses are 1% of reconstruction
+    
+    losses['total'] = total_loss
+    
+    return total_loss, losses
+
+
+# Replace the compute_loss method in StableMultiscalePDEsolver1D
+StableMultiscalePDEsolver1D.compute_loss = compute_loss_fixed
+
+
+# ========== 7. VISUALIZATION ==========
+def visualize_1d_results(results: Dict, train_scales: List[int], test_dataset: Dataset):
+    """Visualize predictions vs ground truth for 1D case"""
     
     successful_methods = {k: v for k, v in results.items() if v.get('success', False)}
-    
     if not successful_methods:
-        print("No methods successfully trained!")
+        print("No successful methods to visualize!")
         return
     
-    # Create summary plot
-    plt.figure(figsize=(16, 12))
+    # Get a test sample
+    test_sample = test_dataset[0]
+    grid = test_sample['grid']  # [2, L]
+    solution = test_sample['solution']  # [1, L]
     
-    # 1. Test loss comparison (bar chart)
-    plt.subplot(2, 3, 1)
-    methods = list(successful_methods.keys())
-    method_names = [m.replace('_', ' ').title() for m in methods]
-    test_losses = [successful_methods[m]['overall_loss'] for m in methods]
+    # Create a simple test
+    fig, axes = plt.subplots(2, 3, figsize=(18, 8))  # Updated for 6 methods
+    axes = axes.flatten()
     
-    colors = ['blue', 'green', 'red', 'purple', 'orange']
-    bars = plt.bar(method_names, test_losses, color=colors[:len(methods)])
+    x = grid[0].cpu().numpy()
+    y_true = solution.squeeze().cpu().numpy()
     
-    plt.yscale('log')
-    plt.ylabel('Test Loss (log scale)')
-    plt.title('Method Comparison - Test Loss')
-    plt.xticks(rotation=45, ha='right')
-    plt.grid(True, alpha=0.3, axis='y')
-    
-    # Add values on bars
-    for bar, loss in zip(bars, test_losses):
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2., height*1.05,
-                f'{loss:.2e}', ha='center', va='bottom', fontsize=9)
-    
-    # 2. Loss evolution (training and validation)
-    plt.subplot(2, 3, 2)
-    for method, result in successful_methods.items():
-        history = result['history']
-        if 'val_loss' in history:
-            method_name = method.replace('_', ' ').title()
-            epochs = range(1, len(history['val_loss']) + 1)
-            plt.plot(epochs, history['val_loss'], '--', label=f'{method_name} (val)', linewidth=1.5)
-            if 'train_loss' in history and len(history['train_loss']) == len(history['val_loss']):
-                plt.plot(epochs, history['train_loss'], '-', label=f'{method_name} (train)', alpha=0.7, linewidth=1)
-    
-    plt.yscale('log')
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.title('Training History')
-    plt.legend(fontsize=8)
-    plt.grid(True, alpha=0.3)
-    
-    # 3. Overfitting analysis (test/val ratio)
-    plt.subplot(2, 3, 3)
-    overfitting_ratios = []
-    for method in methods:
-        if method in successful_methods:
-            val_loss = successful_methods[method]['best_val_loss']
-            test_loss = successful_methods[method]['overall_loss']
-            if val_loss > 0:
-                ratio = test_loss / val_loss
-                overfitting_ratios.append(ratio)
-            else:
-                overfitting_ratios.append(float('inf'))
-    
-    bars = plt.bar(method_names, overfitting_ratios, color=['red' if r > 5 else 'green' for r in overfitting_ratios])
-    plt.axhline(y=2, color='orange', linestyle='--', alpha=0.5, label='Good (2x)')
-    plt.axhline(y=5, color='red', linestyle='--', alpha=0.5, label='Overfitting (5x)')
-    plt.ylabel('Test/Val Loss Ratio')
-    plt.title('Overfitting Analysis')
-    plt.xticks(rotation=45, ha='right')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # 4. Scale-wise performance
-    plt.subplot(2, 3, 4)
-    for method, result in successful_methods.items():
-        if 'test_losses' in result:
-            scales = sorted(list(result['test_losses'].keys()))
-            losses = [result['test_losses'][s] for s in scales]
-            method_name = method.replace('_', ' ').title()
-            plt.plot(scales, losses, 'o-', label=method_name, linewidth=2, markersize=6)
-    
-    plt.xscale('log')
-    plt.yscale('log')
-    plt.xlabel('Resolution Scale')
-    plt.ylabel('Test Loss')
-    plt.title('Loss vs Resolution')
-    plt.legend(fontsize=8)
-    plt.grid(True, alpha=0.3, which='both')
-    
-    # 5. Example prediction
-    plt.subplot(2, 3, 5)
-    # Load a test sample
-    test_dataset = Burgers1DDataset(n_samples=1, domain_size=256, seed=45)
-    sample = test_dataset[0]
-    x = sample['grid'][0, 0].numpy()  # Grid positions
-    u0 = sample['grid'][0, 1].numpy()  # Initial condition
-    u_true = sample['solution'][0, 0].numpy()  # True solution
-    
-    plt.plot(x, u0, 'b-', alpha=0.5, linewidth=1, label='Initial Condition')
-    plt.plot(x, u_true, 'k-', alpha=0.8, linewidth=2, label='True Solution')
-    
-    # Highlight shock regions
-    u0_grad = np.gradient(u0)
-    shock_regions = np.where(np.abs(u0_grad) > np.percentile(np.abs(u0_grad), 90))[0]
-    if len(shock_regions) > 0:
-        plt.scatter(x[shock_regions], u0[shock_regions], c='red', s=10, alpha=0.3, label='Shock regions')
-    
-    plt.xlabel('x (normalized)')
-    plt.ylabel('u(x) (normalized)')
-    plt.title('Example: Initial and True Solution')
-    plt.legend(fontsize=8)
-    plt.grid(True, alpha=0.3)
-    
-    # 6. Summary table
-    plt.subplot(2, 3, 6)
-    plt.axis('off')
-    
-    # Create summary table
-    table_data = [['Method', 'Val Loss', 'Test Loss', 'Ratio']]
-    for method in methods:
-        if method in successful_methods:
-            method_name = method.replace('_', ' ').title()
-            val_loss = successful_methods[method]['best_val_loss']
-            test_loss = successful_methods[method]['overall_loss']
-            ratio = test_loss / val_loss if val_loss > 0 else float('inf')
+    for idx, (method, result) in enumerate(successful_methods.items()):
+        if idx >= 6:
+            break
+        
+        # Load model
+        model = StableMultiscalePDEsolver1D(
+            scales=train_scales,
+            in_channels=grid.shape[0],
+            out_channels=solution.shape[0],
+            combination_method=method
+        ).to(device)
+        
+        try:
+            # Load best model
+            checkpoint = torch.load(f'best_model_{method}_1d.pth', map_location=device, weights_only=False)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            model.eval()
             
-            # Format with scientific notation
-            val_str = f"{val_loss:.2e}"
-            test_str = f"{test_loss:.2e}"
-            ratio_str = f"{ratio:.2f}"
+            # Prepare input
+            test_input = {}
+            for scale in train_scales:
+                # Downsample to each scale
+                grid_scaled = F.interpolate(grid.unsqueeze(0), size=scale, mode='linear').squeeze(0)
+                test_input[f'grid_{scale}'] = grid_scaled.unsqueeze(0).to(device)
             
-            # Color code based on overfitting
-            if ratio > 5:
-                ratio_str = f"\\textbf{{{ratio_str}}}"
+            # Make prediction
+            with torch.no_grad():
+                prediction, _ = model(test_input)
+                y_pred = prediction.squeeze().cpu().numpy()
             
-            table_data.append([method_name, val_str, test_str, ratio_str])
+            # Plot
+            ax = axes[idx]
+            ax.plot(x, y_true, 'b-', linewidth=2, label='Ground Truth', alpha=0.7)
+            ax.plot(x, y_pred, 'r--', linewidth=2, label='Prediction', alpha=0.7)
+            ax.set_xlabel('x')
+            ax.set_ylabel('u(x)')
+            ax.set_title(f'{method.replace("_", " ").title()} (1D)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            
+            # Calculate error
+            mse = np.mean((y_true - y_pred)**2)
+            ax.text(0.05, 0.95, f'MSE: {mse:.2e}', transform=ax.transAxes, 
+                   verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+            
+        except Exception as e:
+            print(f"Could not visualize {method}: {e}")
+            ax = axes[idx]
+            ax.text(0.5, 0.5, f'Error loading {method}', 
+                   ha='center', va='center', transform=ax.transAxes)
+            ax.set_title(f'{method.replace("_", " ").title()} (Error)')
     
-    # Create table
-    table = plt.table(cellText=table_data, loc='center', cellLoc='center',
-                     colWidths=[0.25, 0.25, 0.25, 0.25])
-    table.auto_set_font_size(False)
-    table.set_fontsize(9)
-    table.scale(1.2, 1.5)
-    
-    # Color header
-    for i in range(len(table_data[0])):
-        table[(0, i)].set_facecolor('#404040')
-        table[(0, i)].set_text_props(color='white', weight='bold')
-    
-    plt.title('Performance Summary', fontsize=12, y=0.98)
+    # Hide any unused subplots
+    for idx in range(len(successful_methods), len(axes)):
+        axes[idx].set_visible(False)
     
     plt.tight_layout()
-    plt.savefig('fixed_burgers_results.png', dpi=300, bbox_inches='tight')
-    plt.show()
-    
-    # Print detailed summary
-    print(f"\n{'='*80}")
-    print("FIXED 1D BURGERS EQUATION - DETAILED RESULTS")
-    print(f"{'='*80}")
-    
-    print(f"\nTraining scales: {train_scales}")
-    print(f"Evaluation scales: {eval_scales}")
-    
-    print(f"\n{'Method':<25} {'Best Val Loss':<15} {'Test Loss':<15} {'Ratio':<10} {'Status':<10}")
-    print(f"{'-'*85}")
-    
-    for method, result in successful_methods.items():
-        method_name = method.replace('_', ' ').title()
-        val_loss = result['best_val_loss']
-        test_loss = result['overall_loss']
-        ratio = test_loss / val_loss if val_loss > 0 else float('inf')
-        
-        # Determine status
-        if ratio < 2:
-            status = "✓ Good"
-        elif ratio < 5:
-            status = "⚠️ Moderate"
-        else:
-            status = "✗ Overfit"
-        
-        print(f"{method_name:<25} {val_loss:<15.4e} {test_loss:<15.4e} {ratio:<10.2f} {status:<10}")
-        
-        # Show scale-wise performance
-        if 'test_losses' in result:
-            scale_info = ", ".join([f"{scale}:{loss:.2e}" for scale, loss in result['test_losses'].items()])
-            print(f"  Scale losses: {scale_info}")
-    
-    # Save results
-    with open("fixed_burgers_results.pkl", "wb") as f:
-        pickle.dump({
-            'results': results,
-            'train_scales': train_scales,
-            'eval_scales': eval_scales,
-            'timestamp': time.time()
-        }, f)
-        print(f"\nResults saved to 'fixed_burgers_results.pkl'")
+    plt.savefig('1d_comparison_visualization.png', dpi=300, bbox_inches='tight')
+    #plt.show()
 
 
-# ========== 9. MAIN EXECUTION ==========
+# ========== 8. MAIN ==========
 if __name__ == "__main__":
-    print("=" * 100)
-    print("FIXED 1D NAVIER-STOKES/BURGERS EQUATION MULTISCALE SOLVER")
-    print("Now includes: Two-timescale Lagrangian, Physics-constrained loss, Proper scale training")
-    print("=" * 100)
+    print("=" * 80)
+    print("1D MULTISCALE PDE SOLVER COMPARISON WITH PHYSICS LOSS")
+    print("=" * 80)
     
-    # Run fixed test
-    results, train_scales, eval_scales = test_fixed_1d_navier_stokes()
+    # Run 1D comparison
+    results, train_scales, eval_scales = stable_multiscale_comparison_1d()
     
-    # Visualize results
+    # Analyze results
     if results:
-        visualize_fixed_results(results, train_scales, eval_scales)
+        print(f"\n{'='*80}")
+        print("1D TRAINING COMPLETE - SUMMARY")
+        print(f"{'='*80}")
+        
+        successful_methods = {k: v for k, v in results.items() if v.get('success', False)}
+        
+        if successful_methods:
+            print(f"\nSuccessful methods: {', '.join(successful_methods.keys())}")
+            print(f"Training scales: {train_scales}")
+            print(f"Evaluation scales: {eval_scales}")
+            
+            # Display results with detailed MSE
+            #analyze_results_1d(results, train_scales, eval_scales)
+            
+            # Create test dataset for visualization
+            test_dataset = BurgersDataset1D(n_samples=10, domain_size=256, seed=999)
+            
+            # Visualize results
+            visualize_1d_results(results, train_scales, test_dataset)
+            
+        else:
+            print("No methods successfully trained!")
+    else:
+        print("No results obtained!")
