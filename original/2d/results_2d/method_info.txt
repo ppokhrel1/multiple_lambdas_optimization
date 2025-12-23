@@ -1,6 +1,0 @@
-simple_average: Simple Average
-inverse_variance: Inverse Variance
-softmax: Softmax
-lagrangian_single_scale: Single-Scale Lagrangian
-lagrangian_two_scale: Two-Scale Lagrangian
-admm: ADMM
