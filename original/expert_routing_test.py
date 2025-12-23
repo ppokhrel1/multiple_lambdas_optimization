@@ -25,7 +25,7 @@ class HuberLoss(nn.Module):
    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
        diff = pred - target
        abs_diff = diff.abs()
-       quadratic = torch.min(abs_diff, torch.tensor(self.delta, device=diff.device))
+       quadratic = torch.min(abs_diff, torch.tensor(self.delta))
        linear = abs_diff - quadratic
        loss = 0.5 * quadratic.pow(2) + self.delta * linear
        return loss.mean()
@@ -397,17 +397,16 @@ class SoftmaxExpertSystem(nn.Module):
       
        solver_outputs = torch.stack(solver_outputs, dim=1)
       
-       # Update usage statistics only during training
-       if self.training:
-           with torch.no_grad():
-               self.usage_count += weights.sum(dim=0)
+       # Update usage statistics
+       with torch.no_grad():
+           self.usage_count += weights.sum(dim=0)
       
        # Weighted combination
        combined = (solver_outputs * weights.unsqueeze(-1)).sum(dim=1)
       
        metadata = {
            'weights': weights,
-           'regime_weights': weights,
+           'regime_weights': weights,  # For compatibility with Lagrangian system
            'usage_count': self.usage_count.clone()
        }
       
@@ -435,22 +434,19 @@ class SoftmaxExpertSystem(nn.Module):
            solver_losses.append(loss)
        solver_losses = torch.stack(solver_losses)
       
-       # Load balancing loss (only use during training)
-       if self.training:
-           usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
-           target_prob = torch.ones_like(usage_prob) / self.n_experts
-           balance_loss = F.kl_div(
-               usage_prob.log(), target_prob, reduction='sum'
-           )
-       else:
-           balance_loss = torch.tensor(0.0, device=x.device)
+       # Load balancing loss
+       usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
+       target_prob = torch.ones_like(usage_prob) / self.n_experts
+       balance_loss = F.kl_div(
+           usage_prob.log(), target_prob, reduction='sum'
+       )
       
        # Total loss
        total_loss = recon_loss + 0.1 * balance_loss
       
        metadata.update({
            'recon_loss': recon_loss.item(),
-           'balance_loss': balance_loss.item() if self.training else 0.0
+           'balance_loss': balance_loss.item()
        })
       
        return total_loss, metadata
@@ -510,10 +506,9 @@ class ADMMExpertSystem(nn.Module):
       
        solver_outputs = torch.stack(solver_outputs, dim=1)
       
-       # Update usage statistics only during training
-       if self.training:
-           with torch.no_grad():
-               self.usage_count += weights.sum(dim=0)
+       # Update usage statistics
+       with torch.no_grad():
+           self.usage_count += weights.sum(dim=0)
       
        # Weighted combination
        combined = (solver_outputs * weights.unsqueeze(-1)).sum(dim=1)
@@ -555,13 +550,10 @@ class ADMMExpertSystem(nn.Module):
        # Simplex constraint penalty (z should be on probability simplex)
        simplex_loss = torch.relu(-self.z).sum() + torch.relu(self.z.sum() - 1) ** 2
        
-       # Load balancing regularization (only during training)
-       if self.training:
-           usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
-           target_prob = torch.ones_like(usage_prob) / self.n_experts
-           balance_loss = F.kl_div(usage_prob.log(), target_prob, reduction='sum')
-       else:
-           balance_loss = torch.tensor(0.0, device=x.device)
+       # Load balancing regularization
+       usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
+       target_prob = torch.ones_like(usage_prob) / self.n_experts
+       balance_loss = F.kl_div(usage_prob.log(), target_prob, reduction='sum')
        
        # Total loss
        total_loss = recon_loss + admm_loss + 0.1 * simplex_loss + 0.1 * balance_loss
@@ -570,7 +562,7 @@ class ADMMExpertSystem(nn.Module):
            'recon_loss': recon_loss.item(),
            'admm_loss': admm_loss.item(),
            'simplex_loss': simplex_loss.item(),
-           'balance_loss': balance_loss.item() if self.training else 0.0,
+           'balance_loss': balance_loss.item(),
            'primal_residual': torch.norm(r).item()
        })
       
@@ -602,181 +594,136 @@ class ADMMExpertSystem(nn.Module):
 
 # New Single Time Scale Lagrangian System
 class SingleTimeScaleLagrangianExpertSystem(nn.Module):
-    """Complete system using single time scale Lagrangian optimization"""
-    def __init__(
-        self,
-        solvers: List[BasePDESolver],
-        input_dim: int,
-        hidden_dim: int = 64,
-        rho: float = 0.1,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
-    ):
-        super().__init__()
-        self.solvers = nn.ModuleList(solvers)
-        self.n_experts = len(solvers)
-        self.input_dim = input_dim
-        self.device = device
-        self.rho = rho
-        
-        # Store solver characteristics
-        self.solver_characteristics = [
-            solver.characteristics for solver in solvers
-        ]
-        
-        # Initialize router
-        self.router = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, self.n_experts)
-        )
-        
-        # Lagrangian parameters - initialized with softmax for stability
-        self.lambda_weights = nn.Parameter(torch.ones(self.n_experts) / self.n_experts)
-        
-        # Dual variables
-        self.mu = nn.Parameter(torch.zeros(1))
-        self.nu = nn.Parameter(torch.zeros(self.n_experts))
-        
-        self.huber = HuberLoss(delta=1.0)
-        # Expert usage tracking
-        self.register_buffer('usage_count', torch.zeros(self.n_experts))
-        self.register_buffer('total_batches', torch.zeros(1))
-    
-    def forward(
-        self,
-        x: torch.Tensor,
-        return_all: bool = False
-    ) -> Tuple[torch.Tensor, Dict]:
-        # Get routing weights from router network
-        router_logits = self.router(x)
-        router_weights = F.softmax(router_logits, dim=-1)
-        
-        # Get lambda_softmax (always sum to 1)
-        lambda_softmax = F.softmax(self.lambda_weights, dim=0)
-        
-        # Combine router weights with lambda weights (proper weighted combination)
-        combined_weights = lambda_softmax.unsqueeze(0) * router_weights
-        combined_weights = combined_weights / (combined_weights.sum(dim=-1, keepdim=True) + 1e-8)
-        
-        # Get solutions from all solvers
-        solver_outputs = []
-        for solver in self.solvers:
-            output = solver(x)
-            solver_outputs.append(output)
-        
-        solver_outputs = torch.stack(solver_outputs, dim=1)
-        
-        # Update usage statistics only during training
-        if self.training:
-            with torch.no_grad():
-                self.usage_count += combined_weights.sum(dim=0)
-                self.total_batches += 1
-        
-        # Weighted combination
-        combined = (solver_outputs * combined_weights.unsqueeze(-1)).sum(dim=1)
-        
-        metadata = {
-            'weights': combined_weights,
-            'router_weights': router_weights,
-            'lambda_softmax': lambda_softmax,
-            'usage_count': self.usage_count.clone(),
-            'solver_outputs': solver_outputs if return_all else None
-        }
-        
-        if return_all:
-            metadata['solver_outputs'] = solver_outputs
-        
-        return combined, metadata
-    
-    def compute_loss(
-        self,
-        x: torch.Tensor,
-        target: torch.Tensor
-    ) -> Tuple[torch.Tensor, Dict]:
-        # Forward pass to get predictions and metadata
-        combined, metadata = self.forward(x, return_all=True)
-        solver_outputs = metadata['solver_outputs']
-        
-        # Compute individual expert losses
-        expert_losses = []
-        for i in range(self.n_experts):
-            loss = self.huber(solver_outputs[:, i], target)
-            expert_losses.append(loss)
-        expert_losses = torch.stack(expert_losses)  # [n_experts]
-        
-        # Constraint terms
-        g_lambda = 1 - torch.sum(self.lambda_weights)
-        h_lambda = -self.lambda_weights  # lambda_weights >= 0
-        
-        # Expert utilization loss (only during training)
-        if self.training:
-            epsilon = 1e-8
-            usage_prob = self.usage_count / (self.usage_count.sum() + epsilon)
-            target_prob = torch.ones_like(usage_prob) / self.n_experts
-            utilization_loss = F.kl_div(
-                (usage_prob + epsilon).log(),
-                target_prob,
-                reduction='sum'
-            )
-        else:
-            utilization_loss = torch.tensor(0.0, device=x.device)
-        
-        # Get lambda_softmax for weighting (different from raw lambda_weights)
-        lambda_softmax = F.softmax(self.lambda_weights, dim=0)
-        
-        # Weighted reconstruction loss using lambda_softmax
-        weighted_recon_loss = torch.sum(lambda_softmax * expert_losses)
-        
-        # Lagrangian loss components
-        mu_term = self.mu * g_lambda
-        nu_term = torch.sum(self.nu * h_lambda)
-        penalty_term = (self.rho / 2) * (g_lambda**2 + torch.sum(F.relu(h_lambda)**2))
-        
-        # Total Lagrangian loss
-        lagrangian_loss = weighted_recon_loss + mu_term + nu_term + penalty_term
-        
-        # Add utilization loss as regularization (only during training)
-        total_loss = lagrangian_loss + 0.1 * utilization_loss
-        
-        metadata.update({
-            'weighted_recon_loss': weighted_recon_loss.item(),
-            'g_lambda': g_lambda.item(),
-            'h_lambda_max': torch.max(h_lambda).item(),
-            'mu_term': mu_term.item(),
-            'nu_term': nu_term.item(),
-            'penalty_term': penalty_term.item(),
-            'utilization_loss': utilization_loss.item() if self.training else 0.0,
-            'lambda_softmax': lambda_softmax.detach()
-        })
-        
-        return total_loss, metadata
-    
-    def clip_dual_variables(self):
-        """Clip dual variables to prevent explosion"""
-        with torch.no_grad():
-            self.mu.data.clamp_(-10.0, 10.0)
-            self.nu.data.clamp_(0, 10.0)  # nu should be non-negative for inequality constraints
-    
-    def project_lambda_weights(self):
-        """Properly project lambda weights onto probability simplex"""
-        with torch.no_grad():
-            v = self.lambda_weights
-            # Use the same projection as TwoTimeScaleLagrangianOptimizer
-            v_sorted, _ = torch.sort(v, descending=True)
-            cssv = torch.cumsum(v_sorted, dim=0)
-            rho = (cssv - 1) / torch.arange(1, len(v) + 1, device=v.device)
-            
-            valid_indices = torch.where(v_sorted > rho)[0]
-            if valid_indices.numel() > 0:
-                rho_star = rho[valid_indices[-1]]
-                projected = torch.maximum(v - rho_star, torch.zeros_like(v))
-            else:
-                projected = torch.maximum(v, torch.zeros_like(v))
-            
-            self.lambda_weights.data = projected
-            
+   """Complete system using single time scale Lagrangian optimization"""
+   def __init__(
+       self,
+       solvers: List[BasePDESolver],
+       input_dim: int,
+       hidden_dim: int = 64,
+       rho: float = 1.0,
+       device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+   ):
+       super().__init__()
+       self.solvers = nn.ModuleList(solvers)
+       self.n_experts = len(solvers)
+       self.input_dim = input_dim
+       self.device = device
+       self.rho = rho
+      
+       # Store solver characteristics
+       self.solver_characteristics = [
+           solver.characteristics for solver in solvers
+       ]
+      
+       # Initialize router
+       self.router = nn.Sequential(
+           nn.Linear(input_dim, hidden_dim),
+           nn.ReLU(),
+           nn.Linear(hidden_dim, hidden_dim),
+           nn.ReLU(),
+           nn.Linear(hidden_dim, self.n_experts)
+       )
+      
+       # Lagrangian parameters - all optimized together
+       self.lambda_weights = nn.Parameter(torch.ones(self.n_experts) / self.n_experts)
+       self.mu = nn.Parameter(torch.zeros(1))
+       self.nu = nn.Parameter(torch.zeros(self.n_experts))
+
+       self.huber = HuberLoss(delta=1.0)
+       # Expert usage tracking
+       self.register_buffer('usage_count', torch.zeros(self.n_experts))
+  
+   def forward(
+       self,
+       x: torch.Tensor,
+       return_all: bool = False
+   ) -> Tuple[torch.Tensor, Dict]:
+       # Get routing weights from router network
+       router_logits = self.router(x)
+       router_weights = F.softmax(router_logits, dim=-1)
+      
+       # Combine with Lagrangian weights
+       combined_weights = F.softmax(self.lambda_weights, dim=0).unsqueeze(0) * router_weights
+       combined_weights = combined_weights / (combined_weights.sum(dim=-1, keepdim=True) + 1e-8)
+      
+       # Get solutions from all solvers
+       solver_outputs = []
+       for solver in self.solvers:
+           output = solver(x)
+           solver_outputs.append(output)
+      
+       solver_outputs = torch.stack(solver_outputs, dim=1)
+      
+       # Update usage statistics
+       with torch.no_grad():
+           self.usage_count += combined_weights.sum(dim=0)
+      
+       # Weighted combination
+       combined = (solver_outputs * combined_weights.unsqueeze(-1)).sum(dim=1)
+      
+       metadata = {
+           'weights': combined_weights,
+           'router_weights': router_weights,
+           'lambda_weights': self.lambda_weights,
+           'usage_count': self.usage_count.clone(),
+           'solver_outputs': solver_outputs if return_all else None
+       }
+      
+       if return_all:
+           metadata['solver_outputs'] = solver_outputs
+      
+       return combined, metadata
+  
+   def compute_loss(
+       self,
+       x: torch.Tensor,
+       target: torch.Tensor
+   ) -> Tuple[torch.Tensor, Dict]:
+       # Forward pass with all outputs
+       combined, metadata = self.forward(x, return_all=True)
+       solver_outputs = metadata['solver_outputs']
+      
+       # Reconstruction loss
+       recon_loss = self.huber(combined, target)
+      
+       # Compute individual solver losses
+       solver_losses = []
+       for i in range(self.n_experts):
+           loss = self.huber(solver_outputs[:, i], target)
+           solver_losses.append(loss)
+       solver_losses = torch.stack(solver_losses)
+      
+       # Lagrangian constraints
+       g_lambda = 1 - self.lambda_weights.sum()
+       h_lambda = -self.lambda_weights
+      
+       # Single time scale Lagrangian loss
+       lagrangian = recon_loss + \
+                   self.mu * g_lambda + \
+                   (self.nu * h_lambda).sum() + \
+                   (self.rho/2) * (g_lambda**2 + (torch.relu(h_lambda)**2).sum())
+      
+       # Add entropy regularization for exploration
+       entropy = -(F.softmax(self.lambda_weights, dim=0) *
+                  F.log_softmax(self.lambda_weights, dim=0)).sum()
+       lagrangian = lagrangian - 0.01 * entropy
+      
+       # Load balancing
+       usage_prob = metadata['usage_count'] / (metadata['usage_count'].sum() + 1e-6)
+       target_prob = torch.ones_like(usage_prob) / self.n_experts
+       balance_loss = F.kl_div(usage_prob.log(), target_prob, reduction='sum')
+       lagrangian = lagrangian + 0.1 * balance_loss
+      
+       metadata.update({
+           'g_lambda': g_lambda,
+           'h_lambda': h_lambda,
+           'recon_loss': recon_loss.item(),
+           'balance_loss': balance_loss.item(),
+           'solver_losses': solver_losses.detach()
+       })
+      
+       return lagrangian, metadata
+
 
 # Router Implementations
 class LagrangianExpertRouter(nn.Module):
@@ -846,17 +793,14 @@ class LagrangianExpertRouter(nn.Module):
        g_lambda = 1 - self.lambda_weights.sum()
        h_lambda = -self.lambda_weights
       
-       # Expert utilization loss (only during training)
-       if self.training:
-           usage_prob = self.usage_count / (self.usage_count.sum() + epsilon)
-           target_prob = torch.ones_like(usage_prob) / self.n_experts
-           utilization_loss = F.kl_div(
-               (usage_prob + epsilon).log(),
-               target_prob,
-               reduction='sum'
-           )
-       else:
-           utilization_loss = torch.tensor(0.0, device=expert_outputs.device)
+       # Expert utilization loss
+       usage_prob = self.usage_count / (self.usage_count.sum() + epsilon)
+       target_prob = torch.ones_like(usage_prob) / self.n_experts
+       utilization_loss = F.kl_div(
+           (usage_prob + epsilon).log(),
+           target_prob,
+           reduction='sum'
+       )
       
        # Regime-based weighting with stability
        regime_expert_weights = torch.zeros(
@@ -887,7 +831,7 @@ class LagrangianExpertRouter(nn.Module):
            'g_lambda': g_lambda,
            'h_lambda': h_lambda,
            'weighted_loss': weighted_loss.item(),
-           'utilization_loss': utilization_loss.item() if self.training else 0.0,
+           'utilization_loss': utilization_loss.item(),
            'expert_losses': torch.mean(expert_losses, dim=1),
            'regime_weights': regime_weights
        }
@@ -904,11 +848,10 @@ class LagrangianExpertRouter(nn.Module):
        weights = F.softmax(self.lambda_weights, dim=0)
        weights = weights.view(1, -1).expand(batch_size, -1)
       
-       # Update usage statistics only during training
-       if self.training:
-           with torch.no_grad():
-               self.usage_count += weights.sum(dim=0)
-               self.regime_count += regime_weights.sum(dim=0)
+       # Update usage statistics
+       with torch.no_grad():
+           self.usage_count += weights.sum(dim=0)
+           self.regime_count += regime_weights.sum(dim=0)
       
        metadata = {
            'regime_weights': regime_weights,
@@ -973,33 +916,26 @@ class SingleLearningRateLagrangianOptimizer:
         
         # Clip gradients (applied globally before step)
         torch.nn.utils.clip_grad_norm_(
-             self.optimizer.param_groups[0]['params'],
+             self.optimizer.param_groups[0]['params'], # Only one group now
              max_norm=self.clipgrad
         )
         
+        # Update model and lambda parameters using the single learning rate
         self.optimizer.step()
        
+        # 🔧 Apply projection and noise injection only to lambda_weights (manual step)
         with torch.no_grad():
+            
+            # Project lambda weights onto simplex
             self.model.lambda_weights.data = self.project_simplex(
                 self.model.lambda_weights.data
             )
-            
-            # Clip dual variables if model has the method
-            if hasattr(self.model, 'clip_dual_variables'):
-                self.model.clip_dual_variables()
-            
-            if hasattr(self.model, 'lambda_weights'):
-                noise = 1e-6 * torch.randn_like(self.model.lambda_weights)
-                self.model.lambda_weights.data.add_(noise)
-                
-                # Re-project after adding noise
-                if hasattr(self.model, 'project_lambda_weights'):
-                    self.model.project_lambda_weights()
-                else:
-                    self.model.lambda_weights.data = self.project_simplex(
-                        self.model.lambda_weights.data
-                    )
-
+            # Add small noise to break symmetry
+            noise = 0.01 * torch.randn_like(self.model.lambda_weights)
+            self.model.lambda_weights.data.add_(noise)
+            self.model.lambda_weights.data = self.project_simplex(
+                self.model.lambda_weights.data
+            )
             
     def state_dict(self):
         """Returns the state of the optimizer and its config."""
@@ -1378,13 +1314,6 @@ class Trainer:
                eta_theta=learning_rate,
                eta_lambda=learning_rate * 0.1
            )
-       elif isinstance(model, SingleTimeScaleLagrangianExpertSystem):
-            # SingleTimeScale model should be trained with SingleLearningRateOptimizer
-            self.optimizer = SingleLearningRateLagrangianOptimizer(
-                model, 
-                eta=learning_rate, 
-                clipgrad=1.0
-            )
        else:
            self.optimizer = torch.optim.Adam(
                model.parameters(),
@@ -1420,7 +1349,7 @@ class Trainer:
       
        self.optimizer.zero_grad()
       
-       if isinstance(self.model, (LagrangianExpertSystem, SingleTimeScaleLagrangianExpertSystem, SoftmaxExpertSystem, ADMMExpertSystem)):
+       if isinstance(self.model, (LagrangianExpertSystem, SingleTimeScaleLagrangianExpertSystem)):
            loss, metadata = self.model.compute_loss(x, u)
           
            if torch.isnan(loss):
@@ -1432,39 +1361,47 @@ class Trainer:
           
            loss.backward()
           
+           # Fixed: Call step without arguments
            self.optimizer.step()
-           
-           # Update model-specific variables after optimizer step
-           if isinstance(self.model, SingleTimeScaleLagrangianExpertSystem):
-               with torch.no_grad():
-                   self.model.clip_dual_variables()
-                   if hasattr(self.model, 'project_lambda_weights'):
-                       self.model.project_lambda_weights()
-           elif isinstance(self.model, ADMMExpertSystem):
-               self.model.update_admm_variables()
-            
-           # Extract constraint violation from lambda_softmax
-           if hasattr(self.model, 'lambda_weights'):
-               constraint_violation = torch.abs(1 - self.model.lambda_weights.sum()).item() 
-           else:
-               constraint_violation = 0.0
           
            metrics = {
                'loss': loss.item(),
-               'constraint_violation': constraint_violation,
-               'min_weight': metadata.get('weights', torch.tensor(1.0)).min().item()
+               'constraint_violation': metadata.get('g_lambda', torch.tensor(0.0)).abs().item(),
+               'min_weight': metadata['weights'].min().item()
            }
           
-           if 'recon_loss' in metadata:
+           if 'huber_loss' in metadata:
+               metrics['huber_loss'] = metadata['huber_loss']
+           elif 'recon_loss' in metadata:
                metrics['huber_loss'] = metadata['recon_loss']
-           elif 'weighted_recon_loss' in metadata:
-               metrics['huber_loss'] = metadata['weighted_recon_loss']
           
            return metrics
           
+       elif isinstance(self.model, ADMMExpertSystem):
+           loss, metadata = self.model.compute_loss(x, u)
+          
+           if torch.isnan(loss):
+               return {
+                   'loss': float('nan'),
+                   'primal_residual': float('nan')
+               }
+          
+           loss.backward()
+           torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
+           self.optimizer.step()
+           
+           # Update ADMM variables after optimizer step
+           self.model.update_admm_variables()
+          
+           return {
+               'loss': loss.item(),
+               'huber_loss': metadata['recon_loss'],
+               'primal_residual': metadata['primal_residual'],
+               'admm_loss': metadata['admm_loss']
+           }
+          
        else:
-           # For baseline models (non-expert systems)
-           output = self.model(x)
+           output, metadata = self.model(x)
            loss = self.huber(output, u)
           
            if torch.isnan(loss):
@@ -1479,7 +1416,10 @@ class Trainer:
           
            return {
                'loss': loss.item(),
-               'huber_loss': loss.item()
+               'huber_loss': loss.item(),
+               'regime_accuracy': (
+                   metadata['regime_weights'].argmax(dim=1) == regime_idx
+               ).float().mean().item()
            }
 
 
@@ -1494,23 +1434,36 @@ class Trainer:
                regime_idx = batch['regime_idx'].to(self.device)
               
                try:
-                   if isinstance(self.model, (LagrangianExpertSystem, SingleTimeScaleLagrangianExpertSystem, SoftmaxExpertSystem, ADMMExpertSystem)):
+                   if isinstance(self.model, (LagrangianExpertSystem, SingleTimeScaleLagrangianExpertSystem)):
                        output, metadata = self.model(x)
                        huber_loss = self.huber(output, u)
-                       # Don't compute full loss during validation to avoid updating usage statistics
+                       loss, loss_metadata = self.model.compute_loss(x, u)
+                      
                        metrics = {
-                           'loss': huber_loss.item(),
+                           'loss': loss.item(),
                            'huber_loss': huber_loss.item(),
+                           'constraint_violation': loss_metadata.get('g_lambda', torch.tensor(0.0)).abs().item()
                        }
-                       if hasattr(self.model, 'lambda_weights'):
-                           metrics['constraint_violation'] = torch.abs(1 - self.model.lambda_weights.sum()).item()
+                   elif isinstance(self.model, ADMMExpertSystem):
+                       output, metadata = self.model(x)
+                       huber_loss = self.huber(output, u)
+                       loss, loss_metadata = self.model.compute_loss(x, u)
+                      
+                       metrics = {
+                           'loss': loss.item(),
+                           'huber_loss': huber_loss.item(),
+                           'primal_residual': loss_metadata.get('primal_residual', 0.0)
+                       }
                    else:
-                       output = self.model(x)
+                       output, metadata = self.model(x)
                        huber_loss = self.huber(output, u)
                       
                        metrics = {
                            'loss': huber_loss.item(),
-                           'huber_loss': huber_loss.item()
+                           'huber_loss': huber_loss.item(),
+                           'regime_accuracy': (
+                               metadata['regime_weights'].argmax(dim=1) == regime_idx
+                           ).float().mean().item()
                        }
                   
                    for k, v in metrics.items():
@@ -1581,11 +1534,14 @@ class LagrangianExpertSystem(nn.Module):
       
        solver_outputs = torch.stack(solver_outputs, dim=1)  # [batch_size, n_solvers, input_dim]
       
+       # Use raw lambda weights (without softmax) for training signal
+       combined_weights = self.lambda_weights.view(1, -1, 1).expand(x.size(0), -1, x.size(1))
+      
        # Weighted combination
-       combined = (solver_outputs * weights.unsqueeze(-1)).sum(dim=1)
+       combined = (solver_outputs * combined_weights).sum(dim=1)
       
        metadata = {
-           'weights': weights,
+           'weights': self.lambda_weights,  # Use raw weights
            'router_metadata': router_metadata,
            'solver_outputs': solver_outputs
        }
@@ -1598,11 +1554,11 @@ class LagrangianExpertSystem(nn.Module):
        target: torch.Tensor
    ) -> Tuple[torch.Tensor, Dict]:
        # Forward pass with all outputs
-       combined, metadata = self.forward(x, return_all=True)
-       solver_outputs = metadata['solver_outputs']
+       _, metadata = self.forward(x, return_all=True)
       
        # Get regime weights
        regime_weights = metadata['router_metadata']['regime_weights']
+       solver_outputs = metadata['solver_outputs']
       
        # Compute source-specific losses
        source_losses = []
@@ -1611,7 +1567,7 @@ class LagrangianExpertSystem(nn.Module):
            source_losses.append(loss)
        source_losses = torch.stack(source_losses)
       
-       # Weighted reconstruction loss using lambda weights
+       # Weighted reconstruction loss using raw lambda weights
        recon_loss = (self.lambda_weights * source_losses).sum()
       
        # Strong constraint penalties
@@ -1944,21 +1900,13 @@ def main():
        rho=cfg.rho,
        device=cfg.device
    ).to(cfg.device)
-   
-   # Add baseline FNO model
-   fno_baseline = FourierNeuralOperator(
-       input_dim=cfg.input_dim,
-       modes=16,
-       width=32
-   ).to(cfg.device)
   
    # Initialize trainers for all models
    models = {
        'lagrangian': lagrangian_model,
        'softmax': softmax_model,
        'admm': admm_model,
-       'single_time_scale': single_time_scale_model,
-       'fno_baseline': fno_baseline
+       'single_time_scale': single_time_scale_model
    }
    
    trainers = {}
@@ -1975,40 +1923,30 @@ def main():
        'lagrangian': defaultdict(list),
        'softmax': defaultdict(list),
        'admm': defaultdict(list),
-       'single_time_scale': defaultdict(list),
-       'fno_baseline': defaultdict(list)
+       'single_time_scale': defaultdict(list)
    }
    best_val_loss = {
        'lagrangian': float('inf'),
        'softmax': float('inf'),
        'admm': float('inf'),
-       'single_time_scale': float('inf'),
-       'fno_baseline': float('inf')
+       'single_time_scale': float('inf')
    }
   
    try:
        for epoch in range(cfg.n_epochs):
            print(f"\nEpoch {epoch+1}/{cfg.n_epochs}")
-           print("-" * 40)
           
            # Train all models
            for model_name, trainer in trainers.items():
-               print(f"{model_name.capitalize():<25} | ", end="")
+               print(f"\n{model_name.capitalize()} System:")
                train_metrics = trainer.train_epoch()
                val_metrics = trainer.validate()
               
-               # Print metrics
-               print(f"Train Loss: {train_metrics.get('loss', 0):.4e} | "
-                     f"Val Loss: {val_metrics.get('loss', 0):.4e}", end="")
-               
-               if 'constraint_violation' in train_metrics:
-                   print(f" | Physics: {train_metrics.get('constraint_violation', 0):.4e}")
-               else:
-                   print(f" | Physics: {train_metrics.get('huber_loss', 0):.4e}")
-               
                for k, v in train_metrics.items():
+                   print(f"Train {k}: {v}")
                    metrics[model_name][f'train_{k}'].append(v)
                for k, v in val_metrics.items():
+                   print(f"Val {k}: {v}")
                    metrics[model_name][f'val_{k}'].append(v)
                    
                # Save best models

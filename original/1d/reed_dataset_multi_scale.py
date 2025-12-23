@@ -1693,7 +1693,7 @@ def stable_multiscale_comparison_1d():
         n_samples=5000, domain_size=256, seed=42
     )
     val_dataset = BurgersDataset1D(
-        n_samples=500, domain_size=256, seed=43
+        n_samples=1000, domain_size=256, seed=43
     )
     test_dataset = BurgersDataset1D(
         n_samples=1000, domain_size=256, seed=44
