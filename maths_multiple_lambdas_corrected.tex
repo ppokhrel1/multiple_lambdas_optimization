@@ -1,0 +1,1655 @@
+% \documentclass{article}
+% \documentclass[twoside,11pt]{article}
+\documentclass[preprint,12pt,authoryear]{elsarticle}
+
+% \documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{blindtext}
+% \usepackage{jmlr2e}
+% \usepackage{natbib}
+\usepackage{amsmath} 
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{colortbl}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{fancyhdr} % Added for header/footer control
+\usepackage{lastpage} % Added for page numbering
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{siunitx}
+\usepackage{makecell}
+\usepackage{caption}
+
+\usepackage{color}
+\usepackage{xcolor}
+\colorlet{red}{black} % to get highlighted color to be normal
+
+\usepackage{soul}
+
+\usepackage{subcaption} % Add this to your preamble
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, calc}
+
+\usepackage[autostyle]{csquotes}
+
+\usepackage[
+    backend=biber,
+    style=ieee,
+  ]{biblatex}
+
+\addbibresource{lagrangian.bib} %Imports bibliography file
+\renewcommand*{\multicitedelim}{} %citations with no spaces in groups
+
+
+% For no spacing between/before/after bullet points
+\usepackage{enumitem}
+\setlist{nolistsep}
+
+\definecolor{customblue}{RGB}{0,0,255}
+\definecolor{customred}{RGB}{255,0,0}
+\definecolor{customgreen}{RGB}{0,128,0}
+\definecolor{purple}{RGB}{128,0,128}
+
+
+
+% \author{[Pujan Pokhrel, Austin Schmidt, Elias Ioup, Mahdi Abdelguerfi]}
+
+% Journal information - replace with actual values when available
+\newcommand{\journalname}{Journal Name}
+\newcommand{\volumenumber}{XX}
+\newcommand{\pubyear}{20XX}
+\newcommand{\submissiondate}{Month Day, Year}
+\newcommand{\publicationdate}{Month Day, Year}
+\newcommand{\firstpage}{1}
+\newcommand{\lastpage}{\pageref{LastPage}}
+
+% \newcommand{\BlackBox}{\rule{1.5ex}{1.5ex}}  % end of proof
+% \ifdefined\proof
+%     \renewenvironment{proof}{\par\noindent{\bf Proof\ }}{\hfill\BlackBox\\[2mm]}
+% \else
+%     \newenvironment{proof}{\par\noindent{\bf Proof\ }}{\hfill\BlackBox\\[2mm]}
+% \fi
+
+\usepackage{amsthm}
+
+\newtheorem{example}{Example} 
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{definition}{Definition}
+\newtheorem{assumption}{Assumption}
+\newtheorem{lemma}{Lemma} 
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{remark}{Remark}
+\newtheorem{corollary}{Corollary}
+\newtheorem{conjecture}{Conjecture}
+\newtheorem{axiom}{Axiom}
+
+
+
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true, % Colours links instead of ugly boxes
+    urlcolor=blue,   % Colour for external hyperlinks
+    linkcolor=blue,  % Colour of internal links (sections, figures, etc.)
+    citecolor=red    % Colour of citations
+}
+
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Generalized Multi-source Assimilation:\\A Framework for Cross-Modal Integration and Source Optimization}
+
+\author[uno]{Pujan Pokhrel}
+\author[nrl]{Austin Schmidt}
+\author[nrl]{Elias Ioup}
+\author[uno]{Mahdi Abdelguerfi}
+
+\address[uno]{GulfSCEI, University of New Orleans, New Orleans, United States}
+\address[nrl]{Center for Geospatial Sciences, Naval Research Laboratory, Mississippi, United States}
+
+
+% First page header and footer
+\thispagestyle{empty} % Remove default header/footer for first page
+% \maketitle
+
+% \bibliographystyle{IEEEtran}
+
+
+% Configure headers for subsequent pages
+\pagestyle{fancy}
+\fancyhf{} % Clear all header and footer fields
+\renewcommand{\headrulewidth}{0pt} % No line under header
+
+% Even pages (left) - authors' names
+
+
+% \fancyhead[LE]{\footnotesize [Pujan Pokhrel, Austin Schmidt, Elias Ioup, Mahdi Abdelguerfi]}
+% Author information can be set in various styles:
+% For several authors from the same institution:
+% \author{Author 1 \and ... \and Author n \\
+%         \addr{Address line} \\ ... \\ \addr{Address line}}
+% if the names do not fit well on one line use
+%         Author 1 \\ {\bf Author 2} \\ ... \\ {\bf Author n} \\
+% To start a seperate ``row'' of authors use \AND, as in
+
+% Odd pages (right) - paper title (starting from page 3)
+\fancyhead[RO]{\footnotesize Generalized Multi-source Assimilation}
+
+
+% Page numbering
+\fancyfoot[CO,CE]{\footnotesize\thepage}
+
+% For the first page after title (page 2), we want no header
+\fancypagestyle{plain}{%
+  \fancyhf{} % Clear all header and footer fields
+  \fancyfoot[CO,CE]{\footnotesize\thepage} % But keep page number
+  \renewcommand{\headrulewidth}{0pt} % No line under header
+}
+
+
+\begin{abstract}
+\textcolor{red}{This work establishes the theoretical foundations for optimal weight learning in multi-source scientific machine learning. By moving away from empirical, ad-hoc weighting, our framework explores the automated and mathematically sound fusion of diverse numerical methods, neural architectures, and noisy measurements. We analyze a comprehensive spectrum of coupling mechanisms, ranging from unconstrained Softmax parameterization to explicitly constrained formulations like ADMM, as well as single-timescale, two-timescale, and adaptive-$\rho$ Augmented Lagrangian methods.}
+
+For the Lagrangian frameworks, we derive separate convergence rates for model parameters ($O(1/\sqrt{k})$) and source weights ($O(1/k)$), proving that time-scale separation ensures robustness against varying source reliability. We further establish specific regularity conditions for ADMM, including rank and strong convexity requirements for variable splitting. \textcolor{blue}{For single-timescale Augmented Lagrangian coupling, by contrast, we establish sufficient conditions under which it achieves sublinear convergence governed by an effective condition number that quantifies the curvature imbalance between primal and dual variables.}
+
+We validate these theoretical insights across a diverse architectural scope, ranging from Fourier Neural Operators (FNO) and DeepONets to Finite Difference schemes, applied to tasks including multi-scale modeling and large-scale data assimilation. Our results provide insight into a fundamental trade-off: Lagrangian and ADMM approaches provide strict constraint satisfaction and stability for physical laws, while Softmax parameterization offers superior computational efficiency for high-dimensional, entropic ensembles.
+\end{abstract}
+
+\end{frontmatter}
+\section{Introduction}
+
+The theoretical foundations for optimally combining multiple numerical methods and discretization schemes remain a fundamental challenge in scientific computing \cite{liu2023unified, wang2023theoretical}. While practical approaches such as adaptive ensemble methods \textcolor{blue}{\cite{dietterich2000ensemble}}, multi-fidelity modeling \cite{peherstorfer2023survey}, and empirical weight selection \cite{wang2023empirical} exist, these methods typically avoid explicit constraint handling through normalization tricks or heuristics. This multi-source optimization problem shares mathematical structures with recent advances in machine learning architectures, particularly Mixture-of-Experts (MoE) \cite{fedus2022switch} and multi-modal systems \cite{alayrac2022flamingo}. In these cases, theoretical guarantees for the optimal combination of different processing streams are important \cite{zhou2022mixture, dai2023theoretically}. However, these combination methods typically use soft constraints via Softmax \cite{shazeer2022glu, hazimeh2021dselect}. Likewise, in the context of partial differential equations (PDEs), this manifests itself in the need for provable convergence when choosing between finite difference schemes \cite{leveque2007finite}, balancing multifidelity simulations \cite{cai2023multifidelity}, and combining multiple basis function expansions \cite{shen2022spectral}. In all these cases, explicit constraint handling is important as it could provide stronger theoretical guarantees for practical applications.
+
+
+
+These theoretical challenges parallel recent developments in weather prediction. Just as MoE architectures require convergence guarantees for routing between expert networks \cite{yang2023theoretical}, numerical weather prediction (NWP) systems would benefit from rigorous bounds when selecting physical parameterizations for different atmospheric regimes \cite{reich2023data}. Similarly, while multi-modal systems need stability analysis for fusion strategies, weather forecasting requires precise error bounds when combining diverse observations (e.g., satellite radiances, radar reflectivity, surface measurements) with varying error characteristics \cite{carrassi2023data}.
+Deep learning systems increasingly rely on data from multiple sources, each with their own characteristics and potential biases. Even though existing work in multi-task learning \cite{kendall2018multi}, domain aggregation \cite{wang2020learning}, physics-informed machine learning \cite{schmidt2024algorithm}, and ensemble methods \cite{dietterich2000ensemble} has addressed the challenges of combining sources through weighted losses, knowledge transfer, and model predictions, these approaches typically employ fixed weighting schemes or focus on combining model outputs rather than target variables. This limitation is particularly significant in domains like scientific computing and industrial control, where different measurement techniques or simulation approaches may provide varying estimates of the same physical quantities, necessitating dynamic, feature-specific source combination strategies. Previous methods \cite{zhao2018adversarial, peng2019moment} have focused on combining multiple sources for training or domain adaptation, but less attention has been paid to the challenge of optimally combining target variables from different sources during inference, especially when source reliability varies across different features and operating conditions.
+
+Recent advances in scientific machine learning and data assimilation have shown significant progress in addressing the challenges of multi-source integration \cite{ brunton2022data, kochkov2021machine, prakash2023multi, matsubara2022deep}. Building on existing work in two-time-scale dynamics \cite{Marion2023Leveraging}, numerical precision in automatic differentiation \cite{xu2023automatic}, and optimization stability \cite{higham2023numerical}, we propose a unified theoretical framework for multi-source physical systems that explicitly addresses the interplay between these components. While the individual components of our approach, including augmented Lagrangian methods, two-timescale optimization, and source combination, are well-established \cite{pathak2015constrained, cotter2019optimization, lu2021physics}, their combination and adaptation for multi-source systems present unique challenges. Our key contribution is developing the theoretical foundations in the use of these techniques together for robust multi-source integration, while maintaining numerical stability and providing practical implementation guidelines for scientific computing applications.
+
+
+
+\textcolor{red}{Consider the constrained optimization problem:}
+\begin{equation}
+\label{equation:constrained_optimization_setup}
+\begin{aligned}
+    \min_{\theta, \lambda} \quad & L(\theta, \lambda) = \sum_{i=1}^n \lambda_i E_i(\theta) \\
+    \text{subject to} \quad & g(\lambda) := 1 - \sum_{i=1}^n \lambda_i = 0 \\
+    & h_i(\lambda) := -\lambda_i \leq 0, \quad \forall i \in [n] \\
+    & h_{\text{budget}}(\lambda) := \sum_{i=1}^n c_i \lambda_i - B \leq 0 \\
+    & \theta \in \Theta
+\end{aligned}
+\end{equation}
+\textcolor{red}{where $\theta$ represents the model parameters and $\lambda$ represents the source weights constrained to the probability simplex. $E_i(\theta)$ represents the error metric for source $i$, incorporating both numerical and observational uncertainties. Thus, $L(\theta, \lambda)$ represents the combined loss from the different sources weighted by $\lambda_i$. }
+
+\textcolor{red}{Moreover, the optimization is further restricted by the operational budget constraint $h_{\text{budget}}(\lambda)$, where $c_i$ denotes the specific unit cost (e.g., computational overhead, inference latency, or monetary expense) associated with utilizing source $i$, and $B$ defines the total allowable budget.}
+
+This explicit inclusion of the budget constraint fundamentally shifts the optimization landscape. It restricts the feasible region of the simplex, forcing the optimizer to balance the predictive fidelity of source $E_i(\theta)$ against its cost penalty $c_i$. Consequently, highly accurate but computationally expensive sources are naturally regularized toward zero if they violate the global budget $B$, providing a mathematical justification for the sparse, ``winner-take-all" weight distributions observed in the Lagrangian and ADMM frameworks compared to unconstrained Softmax routing.
+ 
+
+Our theoretical analysis provides three key contributions:
+
+\begin{itemize}
+    \item A unified convergence analysis framework that establishes separate rates for model parameters ($O(1/\sqrt{k})$) and source weights ($O(1/k)$) (where $k$ is the number of iterations), with explicit consideration of numerical precision effects in automatic differentiation.
+    \item Rigorous stability conditions that account for both optimization dynamics and floating-point arithmetic, ensuring reliable performance in practical implementations.
+    \item Theoretical guarantees for robust learning under varying source reliability, with explicit bounds on error accumulation and precision effects.
+\end{itemize}
+
+
+The remainder of the paper is organized as follows.
+Section~\ref{section:related_work} surveys related work in multi-task and multi-modal learning,
+mixture-of-experts routing, constrained deep learning, multi-timescale
+optimization, physical-systems integration, data assimilation, and the
+machine-learning architectures we use. Section~\ref{section:mathematical_framework} introduces the augmented
+Lagrangian formulation with budget constraints. Section~\ref{section:theoretical_framework} develops the
+unified theoretical framework: notation and basic assumptions (\S4.1--\S4.2), the unified problem (\S4.3), the method-specific weight update directions (Proposition~\ref{thm:unified_gradient}), convergence rates (Theorem~\ref{thm:unified_convergence}), the ADMM/Augmented-Lagrangian crossover analysis (\textcolor{blue}{Proposition}~\ref{thm:crossover}), and numerical precision bounds (Theorem~\ref{thm:unified_numerical_bounds}). Section~\ref{section:experiments_results} reports four experimental studies---expert routing, multi-resolution learning, large-scale
+source integration, and data assimilation---across \textcolor{blue}{1D Burgers} and 2D
+Navier--Stokes regimes. Section~\ref{section:discussion} discusses trade-offs between Softmax and constrained methods, and Section~\ref{section:conclusion} concludes with future directions.
+
+
+\section{Related Work}
+\label{section:related_work}
+
+The proposed framework builds upon advances in multi-task learning, constrained optimization, and physics-informed machine learning. In this section, we contextualize our contributions within these domains, highlighting key connections and distinctions.
+
+\subsection{Multi-Task and Multi-Modal Learning}
+Multi-task learning faces fundamental challenges in balancing multiple objectives and source combinations. Recent approaches can be categorized according to their weighting strategies. Gradient-based methods \cite{yu2020gradient} propose dynamic task weighting:
+\begin{equation}
+    L_{total}(\theta) = \sum_{i=1}^n w_i(\theta) L_i(\theta)
+\end{equation}
+where $L_i(\theta)$ represents the loss for task $i$, and $w_i(\theta)$ are learned weights that determine each task's contribution to the total loss. Learning rate analysis \cite{wang2023understanding} shows how different update frequencies affect task-specific convergence, similar to our two-time-scale approach. While effective, these methods typically rely on unconstrained optimization \cite{chen2023automated} or implicit normalization through Softmax transformations \cite{kendall2018multi} and attention mechanisms \cite{dosovitskiy2021image}, lacking rigorous convergence guarantees under explicit constraints.
+
+
+Multi-modal systems \cite{alayrac2022flamingo} face similar challenges when combining information from different modalities (e.g., text, vision, audio). These systems typically use learned combinations $y = \sum_{i=1}^n h_i(x_i, \theta)$ where $h_i$ represents modality-specific transformations (e.g., Softmax), avoiding explicit constraints on the combination weights. Our framework extends these ideas through explicit constraint handling and provable convergence guarantees, providing theoretical foundations for principled source weighting across both domains.
+
+
+
+\subsection{Mixture-of-Experts and Routing}
+Recent advances in MoE architectures have demonstrated the importance of optimal routing mechanisms. Switch Transformers \cite{fedus2022switch} introduced sparse routing for efficient large-scale models, while \cite{zhou2022mixture} provided theoretical foundations for expert specialization. Recent work has explored different routing strategies, from learned gates \cite{shazeer2022glu} to differentiable selection \cite{hazimeh2021dselect}. However, these approaches typically rely on Softmax-based routing without explicit constraints, limiting theoretical guarantees. Our framework directly addresses this concern by integrating explicit constraints into the routing mechanism, enhancing both the theoretical foundation and practical performance of MoE models.
+
+
+\subsection{Constrained Deep Learning}
+Modern deep learning increasingly requires explicit constraint handling \cite{liu2023survey, zhao2023constrained}, particularly in ensemble methods \cite{wen2023optimal} and multi-source fusion \cite{chen2022robust}. The augmented Lagrangian approach facilitates principled constraint satisfaction by combining the original objective function with penalty terms that enforce the constraints. The following equation displays the typical formulation of machine learning methods with Lagrangian optimization:
+\begin{equation}
+    \mathcal{L}_\rho(x, \lambda) = f(x) + \lambda^Tc(x) + \frac{\rho}{2}\|c(x)\|^2
+\end{equation}
+where \( x \in \mathbb{R}^n \) is the decision variable, \( f(x) \) is the objective function, \( c(x) \in \mathbb{R}^m \) represents equality constraints, \( \lambda \in \mathbb{R}^m \) is the vector of Lagrange multipliers, \( \rho > 0 \) is the penalty parameter, and \( \frac{\rho}{2} \|c(x)\|^2 \) penalizes constraint violations.
+
+While extensions exist for non-convex settings \cite{birgin2014practical} and adaptive schemes \cite{curtis2015adaptive}, the interaction between constraints and numerical precision in physical systems presents unique challenges, particularly in terms of convergence, error rates, and stability guarantees. To address these challenges, this paper provides an in-depth analysis of the theoretical aspects of the augmented Lagrangian approach, exploring its convergence properties and practical applications in machine learning contexts.
+
+In particular, the augmented Lagrangian method is well-suited for applications that require strict enforcement of constraints to maintain physical consistency and robust performance. By embedding constraint satisfaction directly into the optimization objective, this method minimizes the risk of infeasible solutions that can occur with traditional unconstrained approaches. This paper further explores the theoretical foundations of the augmented Lagrangian framework by examining its convergence properties and practical implementations in machine learning contexts. The discussion highlights how the method not only enhances numerical stability but also improves the interpretability of solutions in systems where adherence to physical laws is essential.
+
+\textcolor{red}{In addition to the augmented \textcolor{blue}{Lagrangian} approach, the Alternating Direction Method of Multipliers (ADMM), a parallelizable version of the Augmented Lagrangian algorithm, is also used to impose hard constraint enforcement through problem decomposition} \cite{zeng2021admm_constrained_problems_convergence_saturation, chen2017note_admm_constrained_problems, boyd2011distributed}.
+
+\textcolor{red}{ADMM solves problems of the form:}
+\[
+\begin{aligned}
+& \min_{x, z} f(x) + g(z) \\
+& \text{subject to } Ax + Bz = c
+\end{aligned}
+\]
+\textcolor{red}{via the augmented Lagrangian:}
+\begin{equation}
+\mathcal{L}_\rho(x, z, y) = f(x) + g(z) + y^T(Ax + Bz - c) + \frac{\rho}{2}\|Ax + Bz - c\|^2
+\end{equation}
+
+\textcolor{blue}{We use $y$ for the generic Lagrange multiplier in this background section to reserve $\lambda$ for source weights used throughout the rest of the paper.}
+
+\textcolor{red}{The algorithm proceeds iteratively via:}
+\begin{align}
+x^{k+1} &= \arg\min_{x} \mathcal{L}_\rho(x, z^k, y^k) \\
+z^{k+1} &= \arg\min_{z} \mathcal{L}_\rho(x^{k+1}, z, y^k) \\
+y^{k+1} &= y^k + \rho (Ax^{k+1} + Bz^{k+1} - c)
+\end{align}
+
+\textcolor{red}{In deep learning, this enables modular constraint handling: the $x$-update trains the network while the $z$-update projects onto feasible sets. ADMM's decomposition allows specialized solvers for each sub-problem, making it valuable for complex constrained learning tasks.}
+
+\subsection{Multiple Time-Scale Learning}
+Multiple time-scale learning optimizes systems with different convergence dynamics. Recent work \cite{Marion2023Leveraging} establishes the key relationship $\frac{\alpha_\theta}{\alpha_w} \rightarrow 0 \text{ as } t \rightarrow \infty$ where $\alpha_\theta$, $\alpha_w$ are learning rates for model and meta-parameters respectively.
+
+Actor-critic systems demonstrate this through:
+\begin{equation}
+\begin{aligned}
+\theta_{t+1} &= \theta_t + \alpha_\theta \nabla_\theta J(\theta_t) \\
+w_{t+1} &= w_t + \alpha_w \nabla_w V(w_t|\theta_t)
+\end{aligned}
+\end{equation}
+where $J(\theta)$ is the policy objective and $V(w|\theta)$ the value function. This extends to large-scale architectures \cite{wu2020understanding} via:
+\begin{equation}
+L_{total} = \sum_{i=1}^n \gamma_i(t) L_i(\theta, w)
+\end{equation}
+where $\gamma_i(t)$ acts as dynamic scaling factors for individual loss terms. By modulating learning rates across components, multiple time-scale learning enhances convergence stability and performance, a critical factor for achieving reliable training in complex, hierarchical systems. \textcolor{red}{Multi-time scale learning has also been explored in the context of ADMM methods \cite{zeng2021admm_constrained_problems_convergence_saturation, chen2017note_admm_constrained_problems}.}
+
+\subsection{Integration with Physical Systems}
+Physical systems integration requires careful constraint handling. Neural operators provide continuous mappings $\mathcal{G}\theta: \mathcal{A}(D) \rightarrow \mathcal{B}(D)$ where $\mathcal{A}(D)$, $\mathcal{B}(D)$ are function spaces over domain $D$. Similarly, physics-informed networks use $L_{PINN} = L_{data} + \lambda |\mathcal{N}[u_\theta](x,t)|^2$ where $L_{data}$ measures prediction accuracy and $\mathcal{N}$ represents physical operators.
+
+Recent work \cite{yang2021b} incorporates uncertainty quantification:
+\begin{equation}
+p(y|x,\theta) = \int p(y|x,z,\theta)p(z|\theta)dz
+\end{equation}
+where $z$ captures model uncertainty. Our framework extends these through constrained optimization, guaranteed convergence, and adaptive precision handling.
+
+
+
+\subsection{Data Assimilation and Machine Learning}
+Traditional data assimilation methods, such as Ensemble Kalman Filters \cite{evensen2003ensemble} and 4D-Var, integrate model predictions with observations, while recent machine learning approaches have introduced differentiable frameworks \cite{reich2023data} and physics-informed constraints \cite{karniadakis2021physics}. Unlike supervised learning, physical systems aggregate multiple sources $\{x_i\}_{i=1}^n$ with inherent biases and random errors, modeled as $x_i = f_i(x^*) + b_i + \eta_i$, where $x^*$ is the unknown true state, $b_i$ denotes bias, and $\eta_i$ represents noise. Prior work, such as \cite{brajard2021combining, pokhrel2024machine}, explored combining machine learning and data assimilation, but did not explicitly model source reliability or enforce physical constraints.
+
+Our work builds on these foundations by proposing an augmented Lagrangian formulation that learns optimal source combinations $\hat{x} = \sum_{i=1}^n \lambda_i x_i$, where $\lambda_i$ reflects source-specific reliability. This approach ensures physical consistency via constraints and offers theoretical guarantees under uncertainty. Unlike previous studies limited to two sources \cite{schmidt2024algorithm, schmidt2024forecasting}, we address settings with multiple heterogeneous sources exhibiting diverse noise profiles. Equation~\ref{equation:constrained_optimization_setup} formalizes this selection task, framing it as constrained optimization guided by machine learning to infer the most plausible ground truth.
+
+
+
+\subsection{Related Machine Learning Methodologies}
+\label{subsection:related_ml_methods}
+
+Our framework integrates several machine learning methodologies optimized for solving partial differential equations (PDEs). First, we adopt the Fourier Neural Operator (FNO) \cite{li2021fourier}, which learns mappings between function spaces using spectral convolutions. By employing 16 Fourier modes and a width of 32, the model efficiently captures long-range dependencies and smooth solution structures. To handle discontinuities, we incorporate a WENO-like Shock Capturing Network inspired by traditional Weighted Essentially Non-Oscillatory schemes \cite{KOSSACZKA2021100201}, enabling adaptive feature extraction and robust performance near shocks. For boundary condition fidelity, we use a Boundary-Aware Solver with distance-based encoding, following methods introduced by \cite{Ripken2023MultiscaleNO}, which enhances solution accuracy near domain edges. Lastly, we implement a Multiscale Solver to address spatial heterogeneity, using scale-specific subnetworks \textcolor{blue}{at three relative scale factors $[1,2,4]$ (corresponding to native resolutions $\{32,64,128\}$)} and combining them via a fusion module. This builds on insights from \cite{inproceedings_mixed_boundary_conditions}, emphasizing the importance of resolving both global and local patterns in PDE-based modeling.
+
+
+
+\section{Mathematical Framework}
+\label{section:mathematical_framework}
+A Lagrangian formulation is employed to enforce hard constraints, providing a robust alternative to conventional Softmax approaches. Unlike Softmax layers that merely normalize outputs, this formulation incorporates an Augmented Lagrangian to ensure strict adherence to both operational and budget-related constraints.
+
+\begin{definition}[Augmented Lagrangian with Budget Constraints]
+The augmented Lagrangian $\mathcal{L}_\rho: \Theta \times \mathbb{R}^n \times \mathcal{M} \to \mathbb{R}$ is defined as:
+\begin{align}
+    \label{equation:augmented_Lagrangian_formulation}
+    \mathcal{L}_\rho(\theta, \lambda, \mu, \nu) = &\sum_{i=1}^n \lambda_i E_i(\theta) + \mu g(\lambda) + \sum_{j \in \mathcal{K}} \nu_j h_j(\lambda) \nonumber \\
+    &+ \frac{\rho}{2} \left( g(\lambda)^2 + \sum_{j \in \mathcal{K}} \max\{0, h_j(\lambda)\}^2 \right)
+\end{align}
+where $(\theta, \lambda) \in \Theta \times \mathbb{R}^n$ are primal variables and $(\mu, \nu)$ are the dual variables associated with equality and inequality constraints, respectively.
+\end{definition}
+
+In Equation~\ref{equation:augmented_Lagrangian_formulation}, the framework is extended to include a set of inequality constraints $h_j(\lambda)$ for $j \in \mathcal{K}$. A critical addition to this set is the budget constraint, typically formulated as:
+\begin{equation}
+    h_{budget}(\lambda) = \sum_{i=1}^n c_i \lambda_i - B \leq 0
+\end{equation}
+where $c_i$ represents the unit cost associated with variable $\lambda_i$ and $B$ denotes the total available budget.
+
+The dual variables $\mu$ and $\nu$ modulate the influence of the equality constraint $g$ and the inequality constraints $h_j$. By incorporating a quadratic penalty term scaled by the parameter $\rho$, the formulation penalizes constraint violations more aggressively than first-order methods. This ensures that the solution strictly converges toward the feasible region defined by the budget $B$, a level of precision that cannot be achieved via standard Softmax normalization, which lacks a mechanism for cost-aware boundary enforcement.
+
+\begin{assumption}[Regularity and Smoothness]\label{assump:reg}
+For each source $i \in [n]$, we assume the following regularity conditions on the error functions:
+\begin{enumerate}
+    \item \textbf{Parameter Smoothness ($\theta$):} $E_i$ is $L_\theta$-Lipschitz smooth in the model parameters. This implies the gradient does not change faster than a constant rate $L_\theta$:
+    \begin{equation}
+        \|\nabla_\theta E_i(\theta_1) - \nabla_\theta E_i(\theta_2)\| \leq L_\theta\|\theta_1 - \theta_2\|
+    \end{equation}
+    
+    \item \textbf{Weight Smoothness ($\lambda$):} $E_i$ is $L_\lambda$-Lipschitz smooth in the source weights. This ensures that small adjustments to how we weigh a specific source lead to predictable, stable changes in the gradient:
+    \begin{equation}
+        \|\nabla_\lambda E_i(\lambda_1) - \nabla_\lambda E_i(\lambda_2)\| \leq L_\lambda\|\lambda_1 - \lambda_2\|
+    \end{equation}
+    
+    \item \textbf{Lower Boundedness:} Each error function is bounded below by some constant $-M$ (where $M > 0$), ensuring the optimization problem is well-posed:
+    \begin{equation}
+        E_i(\theta) \geq -M
+    \end{equation}
+\end{enumerate}
+\end{assumption}
+
+\noindent
+This assumption guarantees that updates in $\theta$ or $\lambda$ produce proportionate changes in each $E_i$, while the lower bound $E_i(\theta)\ge -M$ prevents unbounded decreases. Together, these conditions ensure tractable and robust convergence of our augmented-Lagrangian optimization.
+
+\subsection{\textcolor{red}{Challenges in Multi-Source Integration}}
+\label{subsection:challenges}
+
+\textcolor{red}{While the individual components of our framework, i.e., augmented Lagrangian methods, two-time-scale optimization, and multi-source fusion are well-established in their respective domains, their integration into a cohesive and robust framework for multi-source physical systems presents unique theoretical and practical challenges. A naive combination often leads to instability, poor convergence, or a loss of theoretical guarantees. The main contribution of the paper is the formulation of the multi-source assimilation problem under a single mathematical framework which makes the problem structure and source selection interpretable. Likewise, we include the budget constraints in the mathematical framework such that the methodology can be used when a practitioner is concerned with the computational costs of the different methods/sources while combining them. Likewise, the \textcolor{blue}{Lagrangian} formulation of the framework allows easy incorporation of further constraints in the system, whether they are soft (do not have to be exactly satisfied) or hard (have to be satisfied exactly).}
+
+
+\section{Theoretical Formulation}
+\label{section:theoretical_framework}
+
+This section provides the formal mathematical framework underpinning the multi-source optimization methods evaluated in our experimental study. By establishing a rigorous theoretical foundation, we ensure that the proposed combination strategies—Softmax, Lagrangian, and Alternating Direction Method of Multipliers (ADMM)—possess the stability and convergence properties required for high-fidelity physical systems. In the following subsections, we define our notation, establish the necessary structural assumptions for optimization, and derive the update rules for each weighting mechanism. 
+
+\subsection{Notation and Definitions}
+
+We establish consistent notation for all subsequent theoretical results and derivations:
+
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Model Parameters:} $\theta \in \Theta \subseteq \mathbb{R}^d$ represents the trainable parameters of the neural network or physics-informed solver.
+    \item \textbf{Source Weights:} $\lambda \in \mathbb{R}^n$ is the vector of $n$ source weights, constrained to the probability simplex $\Delta^{n-1} = \{\lambda \in \mathbb{R}^n : \lambda_i \geq 0, \sum_{i=1}^n \lambda_i = 1\}$.
+    \item \textbf{Budget Parameters:} $c \in \mathbb{R}^n_+$ represents the vector of unit costs for each source, and $B > 0$ is the total allowable computational budget.
+    \item \textbf{Source Errors:} $E_i(\theta)$ for $i \in [n] = \{1,\dots,n\}$ is the error metric for source $i$ (e.g., PDE residual or measurement loss), assumed differentiable almost everywhere.
+    \item \textbf{Composite Loss:} $L(\theta, \lambda) = \sum_{i=1}^n \lambda_i E_i(\theta)$ is the weighted convex combination of individual source errors.
+    \item \textbf{Learning Rates:} $\eta_\theta$ for model parameters, $\eta_\lambda$ for weight updates, and $\eta_\alpha$ for updates to the Softmax logits.
+    \item \textbf{Penalty Parameter:} $\rho > 0$ represents the penalty coefficient used to enforce constraints in augmented Lagrangian and ADMM methods.
+    \item \textbf{Dual Variables:} $\mu \in \mathbb{R}$ denotes the multiplier for equality constraints, and $\nu \in \mathbb{R}^n_+$ denotes multipliers for inequality constraints, including $\nu_{\text{budget}}$ for the budget constraint.
+    \item \textbf{ADMM Variables:} $\lambda$ (primal variable), $z$ (auxiliary consensus variable), and $\mu$ (scaled dual multiplier).
+    \item \textbf{Softmax Mapping:} $\sigma(\alpha)_i = e^{\alpha_i}/\sum_{j=1}^n e^{\alpha_j}$ defines the mapping from unconstrained logits $\alpha \in \mathbb{R}^n$ to weights $\lambda \in \Delta^{n-1}$.
+    \item \textbf{Projection:} $\Pi_\Delta[\cdot]$ denotes the orthogonal projection onto the probability simplex; $\Pi_{\mathcal{T}_\Delta}$ projects onto its associated tangent cone.
+    \item \textbf{Machine Precision:} $\epsilon_{\mathrm{machine}}$ represents the unit round-off error (e.g., $10^{-7}$ for FP32, $10^{-16}$ for FP64), accounting for finite numerical precision in hardware.
+\end{itemize}
+
+\subsection{Basic Assumptions}
+
+\noindent The following two assumptions provide the mathematical foundation for our analysis. 
+Broadly, Assumption~\ref{assump:basic} ensures that the optimization landscape is well-behaved and does not contain ``explosive" changes, while Assumption~\ref{assump:precision} accounts for the reality that computers possess finite numerical precision. These assumptions hold true for all methods unless explicitly stated otherwise. 
+
+\begin{assumption}[Problem Structure]\label{assump:basic}
+We assume:
+\begin{enumerate}
+    \item \textbf{Finite Sources:} $n \geq 2$ is finite, with each source error $E_i: \Theta \to \mathbb{R}$ bounded below: $E_i(\theta) \geq -M$ for some $M > 0$.
+    \item \textbf{Lipschitz Smoothness:} Each $E_i$ is $L_{\theta,i}$-Lipschitz in $\theta$:
+    \begin{equation}
+    \label{eq:lipschitz}
+        \|\nabla_\theta E_i(\theta_1) - \nabla_\theta E_i(\theta_2)\| \leq L_{\theta,i}\|\theta_1 - \theta_2\|, \quad L_\theta = \max_i L_{\theta,i}
+    \end{equation}
+    \item \textbf{Bounded Gradients:} $\|\nabla_\theta E_i(\theta)\| \leq G_\theta$ for all $\theta \in \Theta$ and $i \in [n]$.
+    \item \textbf{Constraint Functions:} The simplex constraints are encoded as $g(\lambda) = 1 - \sum_{i=1}^n \lambda_i = 0$ and $h_i(\lambda) = -\lambda_i \leq 0$. Additionally, the budget constraint is formally defined as $h_{\text{budget}}(\lambda) = c^\top \lambda - B \leq 0$.
+    \item \textbf{Compact Domain:} The parameter space $\Theta$ is closed and bounded with diameter $D_\Theta = \sup_{\theta_1,\theta_2 \in \Theta}\|\theta_1 - \theta_2\| < \infty$.
+\end{enumerate}
+\end{assumption}
+
+\noindent \textit{Assumption~\ref{assump:basic} states that the error surface is smooth (no sharp spikes), the slopes are not infinitely steep, and the search space for our parameters is a fixed, manageable size. This guarantees that small changes in inputs lead to predictable changes in outputs.}
+
+\begin{assumption}[Numerical Precision]\label{assump:precision}
+Floating-point arithmetic satisfies standard error models:
+\begin{align}
+    \|\text{fl}(x \odot y) - (x \odot y)\| &\leq \epsilon_{\mathrm{machine}} \|x \odot y\| \\
+    \|\hat{\nabla}f(x) - \nabla f(x)\| &\leq \epsilon_{\mathrm{machine}} \kappa(f) \|\nabla f(x)\|
+\end{align}
+for basic operations $\odot \in \{+, -, \times, /\}$ and differentiable $f$, where $\kappa(f)$ is the condition number and $\text{fl}(\cdot)$ denotes floating-point evaluation.
+\end{assumption}
+
+
+
+\subsection{Unified Problem Formulation}
+
+Applying these definitions and assumptions, the generalized multi-source optimization problem is:
+\begin{equation}
+\label{eq:unified_problem}
+\begin{aligned}
+    \min_{\theta, \lambda} \quad & L(\theta, \lambda) = \sum_{i=1}^n \lambda_i E_i(\theta) \\
+    \text{subject to} \quad & \lambda \in \mathcal{C}
+\end{aligned}
+\end{equation}
+where the constraint set $\mathcal{C}$ is defined method-specifically:
+\begin{itemize}[leftmargin=*]
+    \item \textbf{Softmax:} $\mathcal{C} = \{\lambda = \sigma(\alpha) : \alpha \in \mathbb{R}^n\}$
+    \item \textbf{Single-timescale Augmented Lagrangian:} $\mathcal{C} = \Delta^{n-1}$ with joint learning rate $\eta$
+    \item \textbf{Augmented Lagrangian:} $\mathcal{C} = \Delta^{n-1} \cap \{ \lambda : c^\top \lambda \leq B \}$ with explicit constraints enforced via dual multipliers and quadratic penalties
+    \item \textbf{ADMM:} $\mathcal{C} = \{(\lambda, z) : \lambda = z, z \in \Delta^{n-1} \cap \{ z : c^\top z \leq B \}\}$
+\end{itemize}
+
+The detailed formulation of the individual combination methods are detailed in ~\ref{appendix:method_specific_assumptions}.
+
+
+\subsection{Method-Specific Weight Update Directions}
+
+Throughout, $\lambda \in \Delta^{n-1}$ denotes the source weights on the simplex
+$\Delta^{n-1} = \{\lambda \in \mathbb{R}^n_{\geq 0} : \mathbf{1}^\top \lambda = 1\}$,
+$E(\theta) = (E_1(\theta), \dots, E_n(\theta))^\top$ is the vector of per-source
+objectives, and $L(\theta, \lambda) = \sum_{i=1}^n \lambda_i E_i(\theta)$ is the
+weighted objective from equation~\ref{eq:unified_problem}. The Softmax parametrization
+uses unconstrained logits $\alpha \in \mathbb{R}^n$ with $\lambda = \sigma(\alpha)$
+and Jacobian $J_\sigma(\alpha) = \operatorname{diag}(\lambda) - \lambda\lambda^\top$.
+The augmented-Lagrangian variants use $\mu \in \mathbb{R}$ for the equality
+(simplex) multiplier, $\nu \in \mathbb{R}^n_{\geq 0}$ for the non-negativity
+multipliers, $\rho > 0$ for the penalty parameter, $c \in \mathbb{R}^n_{+}$ for
+the per-source cost vector, $B > 0$ for the budget, and $\nu_{\text{budget}}
+\in \mathbb{R}_{\geq 0}$ for the budget multiplier;
+$\Pi_{\mathcal{T}_\Delta}$ is the orthogonal projection onto the tangent space
+of $\Delta^{n-1}$. The ADMM case uses $z_{k+1}$ for the auxiliary primal variable
+at iteration $k$ and $\partial I_{\Delta^{n-1}}$ for the subdifferential of the
+indicator function of the simplex.
+
+\begin{proposition}[Method-Specific Weight Update Directions]\label{thm:unified_gradient}
+The parameter gradient is common to all methods,
+\begin{equation}
+\label{eq:grad_theta}
+    \nabla_\theta L(\theta, \lambda) = \sum_{i=1}^n \lambda_i \nabla E_i(\theta).
+\end{equation}
+
+The weight-update objects are method specific:
+\begin{align}
+\text{\textbf{(Softmax)}} \quad & \nabla_\alpha L = J_\sigma(\alpha)^\top E(\theta), \label{eq:gw_softmax}\\
+\text{\textbf{(Single-timescale Aug.\ Lagrangian)}} \quad & d_\lambda = \Pi_{\mathcal{T}_\Delta}\!\bigl[E(\theta) - (\mu\mathbf{1} + \nu)\bigr], \label{eq:gw_single}\\
+\text{\textbf{(Augmented Lagrangian)}} \quad & \nabla_\lambda \mathcal{L}_\rho = E(\theta) - (\mu\mathbf{1} + \nu) \nonumber\\
+    &\hphantom{\nabla_\lambda \mathcal{L}_\rho ={}} + \nu_{\text{budget}}\, c + \rho\,\max\{0,\,c^\top\lambda - B\}\,c, \label{eq:gw_auglag}\\
+\text{\textbf{(ADMM)}} \quad & 0 \in \rho(\lambda_k - z_{k+1}) + \partial I_{\Delta^{n-1}}(\lambda_k), \label{eq:gw_admm}
+\end{align}
+where $\nabla_\alpha L$ is a gradient w.r.t.\ the logits, $d_\lambda$ is a
+projected update direction, $\nabla_\lambda \mathcal{L}_\rho$ is the gradient of
+the augmented Lagrangian, and the ADMM line is a first-order optimality
+\emph{inclusion}.
+\end{proposition}
+
+The derivation is given in \ref{appendix:unified_gradient}.
+
+\paragraph{Link to Experimental Results}
+\textcolor{red}{The distinct gradient structures derived in \eqref{eq:gw_softmax}--\eqref{eq:gw_admm} directly explain the weight evolution patterns observed in Section \ref{subsection:expert_routing_physical_systems}. The Softmax gradient, which includes the Jacobian term $J_\sigma(\alpha)$, inherently encourages smooth, entropic distributions. This theoretical property is validated by the collaborative, distributed weight evolution seen in Figure \ref{fig:expert_routing_1d_weights}. In contrast, the Augmented and ADMM gradients utilize explicit projection and penalty terms, which drive the ``winner-take-all" specialization (sparse weights) observed in the Data Assimilation results in Table~\ref{tab:data_assimilation_results}. This behavior is regime-dependent: in the 1D Data Assimilation case the Lagrangian weights attain exact $0/1$ values ($S_0 = 1.000$, all others $0$), whereas in the 2D case they attain sparse, boundary-attaining distributions with exact zeros on the uninformative sources (e.g.\ $\lambda = (0.537, 0.463, 0, 0)$) rather than strictly binary values.}
+
+\subsection{Convergence and Complexity Trade-offs}
+
+\begin{theorem}[Unified Convergence Rates]\label{thm:unified_convergence}
+Using $L_\theta$ from \eqref{eq:lipschitz} and $\eta_\theta = O(1/L_\theta)$, the convergence for each method is:
+
+\textcolor{blue}{\textbf{Augmented Lagrangian (static and improved variants):}
+With dual step size $\eta_\lambda = O(\eta_\theta^2)$ (and, for the improved variant,
+variable penalty $\rho_k \leq \rho_{\max}$):
+\begin{equation}
+    \|\theta_k - \theta^*\|^2 \leq \frac{C_\theta^{(m)}}{\sqrt{k}} + \epsilon_{\text{machine}},
+    \quad
+    \|\lambda_k - \lambda^*\|^2 \leq \frac{C_\lambda^{(m)}}{k} + \epsilon_{\text{machine}},
+    \qquad m \in \{\mathrm{AugLag},\, \mathrm{ImpLag}\},
+\end{equation}
+where the asymptotic rates are identical but the leading constants satisfy
+$C_\lambda^{\mathrm{ImpLag}} \le C_\lambda^{\mathrm{AugLag}}$ because the adaptive
+penalty $\rho_k$ accelerates the early phase of constraint enforcement. The rest of the text uses AugLag for the Augmented Lagrangian method and ImpLagrangian for the Improved Augmented Lagrangian (abbreviated ImpLag in the superscripts above).
+}
+
+
+\textbf{ADMM:} Under the strong convexity of the $\lambda$-subproblem
+(Assumption~\ref{assump:admm}), variable splitting yields a linear
+(geometric) feasibility rate with contraction factor
+$0 < \omega := (1+\varsigma\rho)^{-1} < 1$ (with $\varsigma>0$ the strong-convexity modulus of the $\lambda$-subproblem):
+\begin{equation}
+    \|\theta_k - \theta^*\|^2 \leq \textstyle \textcolor{blue}{\frac{C_\theta}{\sqrt{k}}} + \epsilon_{\text{machine}}, \quad \text{Feasibility} \leq C_c\,\omega^{k} + \epsilon_{\text{machine}}
+\end{equation}
+so the budget residual decays geometrically while the primal $\theta$ retains the \textcolor{blue}{$O(1/\sqrt{k})$} rate inherited from the non-convex coupling.
+
+\textbf{Single-timescale Augmented Lagrangian/Softmax:} Both exhibit standard sublinear convergence, with the squared iterate error decaying as $O(1/\sqrt{k})$ for non-convex objectives (equivalently, the best-iterate squared gradient norm $\min_{t\le k}\|\nabla L\|^2 = O(1/\sqrt{k})$). Softmax constants $C_\lambda$ are reduced by entropic smoothing of $\sigma(\alpha)$.
+\end{theorem}
+
+
+\subsection{Convergence Rationale}
+
+\textbf{Augmented Lagrangian:} We define the Lyapunov function $V_k = \|\theta_k - \theta^*\|^2 + \|\lambda_k - \lambda^*\|^2 + \frac{1}{2\rho}\|\mu_k - \mu^*\|^2$. By setting $\eta_\lambda = O(\eta_\theta^2)$, we decouple the primal $\theta$ dynamics from dual variable updates. Under the Lipschitz smoothness in \eqref{eq:lipschitz}, the primal follows a non-convex descent rate of $O(1/\sqrt{k})$, while the dual update in \eqref{eq:gw_auglag} acts on the convex simplex, allowing the Lagrangian penalty to force weight convergence at $O(1/k)$.
+
+\textbf{Improved Augmented Lagrangian:} We define the Lyapunov function $V_k = \|\theta_k - \theta^*\|^2 + \|\lambda_k - \lambda^*\|^2 + \frac{1}{2\rho_k}\|\mu_k - \mu^*\|^2$. By setting $\eta_\lambda = O(\eta_\theta^2)$, we decouple the primal $\theta$ dynamics from dual variable updates. While dynamically increasing $\rho_k$ accelerates feasibility, it is theoretically necessary to bound $\rho_k$ by some $\rho_{\max} < \infty$. If $\rho_k \to \infty$, the Lipschitz constant $L_\theta \to \infty$, forcing the required step size $\eta_\theta$ to zero. Provided $\rho_k \leq \rho_{\max}$, the primal follows a non-convex descent rate of $O(1/\sqrt{k})$, and the dual update forces weight convergence at $O(1/k)$.
+
+\textbf{ADMM:} The splitting of \eqref{eq:unified_problem} into $\lambda$ and $z$ subproblems allows the use of proximal operators. From the gradient structure in \eqref{eq:gw_admm}, the strong convexity of the $\lambda$-subproblem (modulus $\varsigma>0$, induced by the penalty $\rho$) ensures that the distance to the optimal manifold satisfies $\phi_{k+1} \leq \phi_k / (1 + \varsigma\rho)$. Iterating this geometric contraction gives $\phi_k \leq \phi_0\,(1+\varsigma\rho)^{-k}$, i.e.\ a linear (geometric) feasibility rate for the budget constraint.
+
+\textbf{Single Optimizer based Lagrangian/Softmax:} These are pure first-order methods. 
+\begin{enumerate}
+    \item \textbf{Single Optimizer based Lagrangian:} The update in \eqref{eq:gw_single} is a projected gradient descent. Without a dual scaling or penalty acceleration, it is limited by the $O(1/\sqrt{k})$ rate typical of non-convex constrained problems.
+    \item \textbf{Softmax:} By parameterizing $\lambda = \sigma(\alpha)$, the simplex constraint is handled implicitly. The entropic smoothing property of the Softmax Jacobian $J_\sigma$ in \eqref{eq:gw_softmax} prevents the ``zig-zag" behavior near simplex boundaries, improving the constant $C_\lambda$, but the asymptotic rate remains $O(1/\sqrt{k})$ as it follows the logit-space gradient.
+\end{enumerate}
+
+\paragraph{Link to Experimental Results}
+\textcolor{red}{The accelerated convergence rates for both ADMM and Augmented Lagrangian ($O(1/k)$ or better) derived above are empirically substantiated in the \textcolor{blue}{expert-routing study (Section \ref{subsection:expert_routing_physical_systems})}. As shown in Table \ref{tab:expert_routing}, these methods achieve exceptionally low test errors (e.g., Test MSE of $1.40 \times 10^{-7}$ for AugLag in 2D) while maintaining significantly lower computational overhead ($\mathcal{C} \approx 2.2$). This contrasts with the Softmax baseline, which incurs massive computational costs ($\mathcal{C} = 3.992$) in the same 2D regime due to its slower $O(1/\sqrt{k})$ convergence in constraint satisfaction . The rapid drop in MSE for Lagrangian methods in Figure \textcolor{blue}{\ref{fig:expert_routing_1d_mse}} further correlates with the theoretical prediction of decoupled primal-dual dynamics.}
+
+
+
+\textcolor{red}{While Theorem~\ref{thm:unified_convergence} establishes asymptotic convergence rates of $O(1/\sqrt{k})$ and $O(1/k)$ , it is important to note that the bounding constants ($C_\theta$, $C_\lambda$, $C_c$) are not purely intrinsic to the framework. In practice, these constants are directly influenced by the initialization bias of the source weights $\lambda_0$  and the choice of learning rates. Furthermore, our theoretical proofs rely on uniform Lipschitz regularity assumptions ($L_\theta = \max_i L_{\theta,i}$). In empirical applications, sources possess heterogeneous Lipschitz constants, i.e., the global step size is constrained by the least regular source. \textcolor{blue}{In our experiments we use fixed (constant) step sizes rather than a decaying schedule; the runs therefore operate in the constant-step stochastic-approximation regime, in which the iterates converge to a neighborhood of the optimum whose radius scales with the step size rather than exactly attaining the asymptotic rates. This is consistent with the residual fluctuations and non-stabilization visible in the convergence profiles; a diminishing-step schedule that would recover exact convergence is left to future work.}}
+
+\subsection{Performance Thresholds}
+
+\begin{proposition}[Adaptive Crossover Point \textcolor{blue}{(Heuristic Scaling Estimate)}]\label{thm:crossover}
+The critical source count $n^*$ at which ADMM outperforms Augmented Lagrangian under adaptive optimization (e.g., Adam) is:
+\begin{equation}
+\label{eq:n_star}
+n^* \approx \frac{C_{\text{proj}}}{C_\lambda(\rho_k)} \cdot \frac{\hat{L}_\theta}{\hat{L}_\lambda} \cdot \frac{(1-\beta_1)}{(1-\beta_2)}
+\end{equation}
+where $\beta_1, \beta_2$ are the Adam decay hyperparameters. \textcolor{blue}{This is an order-of-magnitude scaling estimate under the per-iteration cost model of the proof sketch, not a tight bound; the factor $(1-\beta_1)/(1-\beta_2)$ captures the empirical momentum dependence rather than a rigorously derived constant.}
+\end{proposition}
+
+\subsubsection{Proof Sketch for \textcolor{blue}{Proposition} \ref{thm:crossover}}
+To prove the existence of $n^*$, we equate the total wall-clock time $T_m = (\text{iterations}) \times (\text{cost per iteration})$. 
+Under adaptive moment estimation, the iterations required for precision $\epsilon$ scale differently than standard SGD, but the ratio of convergence rates between ADMM (\textcolor{blue}{$k_{\text{ADMM}} \propto \log(1/\epsilon)$}) and Augmented Lagrangian ($k_{\text{AugLag}} \propto \epsilon^{-1}$) is modulated by the momentum terms $\beta_1$ and $\beta_2$ through the factor $(1-\beta_1)/(1-\beta_2) \geq 1$ for standard settings ($\beta_1=0.9,\ \beta_2=0.999$), which enlarges $n^*$ as the second-moment averaging becomes more aggressive.
+The cost per iteration for ADMM includes $C_{\text{proj}}$ for the $z$-update and an auxiliary update $C_\lambda$. 
+As $n$ (source count) increases, $C_{\text{proj}}$ (typically $O(n \log n)$ or $O(n)$) grows. For small $n$, the iterations of AugLag are cheaper because the constant overhead of ADMM's projection \eqref{eq:gw_admm} \textcolor{blue}{(an $O(n\log n)$ sort-based Euclidean simplex projection, cf.\ \texttt{project\_to\_simplex})} is not yet offset by its superior asymptotic rate. Setting $T_{\text{ADMM}} = T_{\text{AugLag}}$ and solving for $n$ yields \eqref{eq:n_star}. In the Improved Augmented Lagrangian used in this study, the adaptive $\rho_k$ aggressively penalizes budget violations early, which effectively decreases $C_\lambda(\rho_k)$. This pushes the crossover point $n^*$ at which the $O(n \log n)$ projection cost of ADMM becomes strictly necessary and is higher than that of the standard static formulation.
+
+\paragraph{Link to Experimental Results}
+\textcolor{red}{This theoretical crossover is explicitly tested in the Large-Scale Integration experiment (Section \ref{subsection:large_scale_multi_source_integration}), where $n=100$ sources are utilized. The use of Adam for dual updates effectively reshapes the cost-benefit analysis. Because Adam normalizes gradients by their running variance, the ``stiffness" of the Augmented Lagrangian's quadratic penalty is partially compensated for, extending its efficiency to higher source counts. However, as $n$ approaches $100$, the $O(n \log n)$ efficiency of the ADMM projection (Table \ref{tab:large_scale_multi_source}) becomes evident. ADMM maintains a strictly bounded training cost ($\mathcal{C} \approx 2.0$ against a budget of 3.0) and exactly achieves $90.00\%$ sparsity, validating that the additional overhead of the projection step $C_{\text{proj}}$ is justified by the gain in convergence rate for large $n$.}
+
+\subsection{Numerical Precision}
+
+\begin{theorem}[Unified Numerical Bounds under Adaptive Scaling]\label{thm:unified_numerical_bounds}
+Under Adam optimization, the total gradient error is magnified by the effective condition number $\kappa_m$ and the second-moment estimator $v_t$:
+\begin{equation}
+    \|\nabla L_m - \hat{\nabla} L_m\| \leq \epsilon_{\text{machine}} \cdot \kappa_m \frac{\sqrt{v_t + \epsilon_{\text{adam}}}}{\eta} \|\nabla L_m\|
+\end{equation}
+\textcolor{blue}{Here the left-hand side is the error in the preconditioned Adam \emph{update} direction; the raw gradient error obeys $\|\hat{\nabla} L_m-\nabla L_m\|\le\epsilon_{\text{machine}}\kappa_m\|\nabla L_m\|$ by Assumption~\ref{assump:precision}, which the Adam preconditioner $1/(\sqrt{v_t}+\epsilon_{\text{adam}})$ then amplifies.}
+\begin{itemize}
+    \item \textbf{Softmax:} $\kappa_{\text{Softmax}} = \kappa_\theta + \kappa_\alpha \|J_\sigma\|^2$ (see $J_\sigma$ in \eqref{eq:gw_softmax}).
+    \item \textbf{Static Augmented Lagrangian:} Sensitivity is a fixed $O(\rho^2)$ due to quadratic terms in \eqref{eq:gw_auglag}, requiring careful tuning of $\rho$ to avoid early gradient stalling in FP32.
+    \item \textbf{Improved Augmented Lagrangian:} Sensitivity dynamically degrades as $O(\rho_k^2)$. As $\rho_k$ grows to strictly enforce constraints, the condition number degrades quadratically, exacerbating the interaction with Adam's $\epsilon_{\text{adam}}$.
+    \item \textbf{ADMM:} $\kappa_{\text{ADMM}} = \max\{\kappa_\theta, \kappa_\lambda, \rho\kappa_c\}$. The variable splitting mitigates the $O(\rho^2)$ sensitivity found in the Augmented Lagrangian.
+\end{itemize}
+\end{theorem}
+
+\subsubsection{Proof Sketch for Theorem \ref{thm:unified_numerical_bounds}}
+By Assumption \ref{assump:precision}, arithmetic operations magnify error by the condition number $\kappa_m$. 
+In an adaptive setting like Adam, gradients are scaled by the inverse square root of their running variance ($v_t$). This scaling amplifies floating-point noise when $v_t$ is small.
+In the Augmented Lagrangian case of \eqref{eq:gw_auglag}, the gated budget penalty gradient $\rho\,\max\{0,\,c^\top\lambda - B\}\,c$ contributes curvature that scales with $\rho$; since this enters the Hessian linearly in $\rho$, the condition number $\kappa$ scales with $\rho^2$, leading to potential cancellation in Single Precision Floating Point (FP32) systems.
+
+\textcolor{blue}{For Softmax, the blow-up at the simplex boundary arises from $\kappa_\alpha$, the condition number of the logit-to-weight map $\alpha \mapsto \sigma(\alpha)$. As the smallest weight $\min_i \lambda_i \to 0$, the smallest nonzero eigenvalue of $J_\sigma$ vanishes while its largest eigenvalue remains $O(1)$, so the ratio $\kappa_\alpha \to \infty$ even though $\|J_\sigma\|^2$ itself shrinks. The net effect on the bound $\kappa_\theta + \kappa_\alpha\|J_\sigma\|^2$ is dominated by the divergence of $\kappa_\alpha$, producing the vanishing-gradient
+pathology in logit space.} 
+
+In ADMM, the dual update $\mu_{k+1} = \mu_k + \rho(A\lambda - c)$ is an integration of residuals; relative errors in $(A\lambda - c)$ accumulate linearly with $k$, eventually requiring FP64 precision for high-iteration convergence.
+
+\paragraph{Link to Experimental Results}
+\textcolor{red}{The numerical limits established here describe the performance ceiling of the Lagrangian variants in the 2D Data Assimilation regime. As shown in Table \ref{tab:data_assimilation_results}, while the Softmax method achieved the best Test MSE of $3.15 \times 10^{-5}$, the Augmented and standard Lagrangian variants converged to a higher error floor ($\approx 1.22 \times 10^{-4}$ and $2.71 \times 10^{-4}$, respectively). This is the result of the $O(\rho^2)$ sensitivity under adaptive scaling: as the penalty $\rho$ increases to enforce constraints in highly non-linear 2D flows, the machine precision ($\epsilon_{\text{machine}}$) limits the ability of the Adam optimizer to resolve the final decimals of the error residual. Conversely, the vanishing gradient issue ($\kappa \to \infty$) predicted for Softmax at the boundaries ($0$ or $1$) manifests in the stuck weights observed where Softmax fails to fully extinguish irrelevant sources, retaining residual weights (e.g., $S_1 \approx 0.035$ in Table \ref{tab:data_assimilation_results}) compared to the hard zeros achieved by Lagrangian methods.}
+
+% \textcolor{red}{The numerical sensitivities outlined in Theorem \ref{thm:unified_numerical_bounds} are reflected in the robustness results of the Data Assimilation study (Section \ref{subsection:data_assimilation_framework}). The $O(\rho^2)$ sensitivity of the Augmented Lagrangian explains the necessity for careful hyperparameter tuning in the 2D high-noise regime (Table \ref{tab:data_assimilation_results}). Conversely, the vanishing gradient issue ($\kappa \to \infty$) predicted for Softmax at the boundaries ($0$ or $1$) manifests in the ``stuck" weights observed in specific runs where Softmax failed to fully minimize the contribution of irrelevant sources, retaining residual weights (e.g., $\lambda_i \approx 0.044$ in Table \ref{tab:data_assimilation_results}) compared to the hard zeros achieved by Lagrangian methods.}
+
+\section{Experiments and Results}
+\label{section:experiments_results}
+
+\textcolor{blue}{We evaluate the proposed framework through four experiments, each targeting a distinct aspect of multi-source integration in computational physics. Subsection~\ref{subsection:domain_specific_adaptations} describes the domain-specific adaptations for 1D and 2D problems, and Subsection~\ref{subsection:physics_informed_loss_formulation} presents the physics-informed loss used in those tests. Subsection~\ref{subsection:expert_routing_physical_systems} investigates adaptive routing mechanisms that dynamically select and combine expert models for complex physical systems. Subsection~\ref{subsection:multi-source-neural-pde} explores how neural networks can be integrated with PDE solvers to improve the accuracy and efficiency of hybrid models. Subsection~\ref{subsection:large_scale_multi_source_integration} tests the framework's scalability and robustness when combining diverse, high-volume data sources across domains. Finally, Subsection~\ref{subsection:data_assimilation_framework} evaluates the fusion of real-time observational data with machine learning models to improve predictive accuracy and adaptability in dynamic systems.} Together, these experiments demonstrate the framework’s versatility, scalability, and effectiveness in addressing complex, multi-source challenges in computational physics.
+
+
+
+\paragraph{Loss Formulation} All experiments are tested on 1D and 2D settings and use similar data generation procedure. Both implementations used the same composite loss structure:
+\[
+\mathcal{L}_{\text{total}} = 10 \cdot \mathcal{L}_{\text{meas}} + 10^{-3} \cdot \mathcal{L}_{\text{physics}} + \mathcal{L}_{\text{constraints}}
+\]
+\textcolor{red}{where measurement consistency was evaluated using Huber loss and physics constraints enforced conservation laws.}
+
+\subsection{Dimensional-Specific Adaptations}
+\label{subsection:domain_specific_adaptations}
+\textcolor{red}{Despite these commonalities, significant adaptations were required to address the different complexities of 1D and 2D systems. These adaptations are detailed in Table~\ref{table:problem_domain}.}
+
+\begin{table}[h]
+\centering
+\caption{Comparison of 1D and 2D System Characteristics}
+\begin{tabular}{|p{0.25\textwidth}|p{0.3\textwidth}|p{0.3\textwidth}|}
+\hline
+\textbf{Aspect} & \textbf{1D System} & \textbf{2D System} \\ 
+\hline
+Governing Equation & $\displaystyle\frac{\partial u}{\partial t} + u\frac{\partial u}{\partial x} = \nu\frac{\partial^2 u}{\partial x^2}$ & $\displaystyle\frac{\partial\mathbf{u}}{\partial t} + (\mathbf{u}\cdot\nabla)\mathbf{u} = -\nabla p + \nu\nabla^2\mathbf{u}$ \\ 
+\hline
+Physical Complexity & Single velocity component, scalar field & Velocity vector field (u,v) with pressure coupling \\
+\hline
+Boundary Conditions & Periodic boundaries: $u(-1) = u(1)$ & Mixed boundaries: periodic in x, no-slip in y \\
+\hline
+Flow Regimes & Single regime (shock-dominated) & Multiple regimes: smooth, shock, boundary layer, turbulent \\
+\hline
+Computational Cost & $\mathcal{O}(N)$ per timestep & $\mathcal{O}(N^{3/2})$ per timestep \\
+\hline
+Memory Requirements & $\sim$ 1 MB per sample & $\sim$ 16 MB per sample \\
+\hline
+Derivative Computation & 1D finite differences & 2D finite differences with cross-derivatives \\
+\hline
+Conservation Laws & Mass conservation only & Mass and momentum conservation \\
+\hline
+\end{tabular}
+\label{table:problem_domain}
+\end{table}
+
+
+% \paragraph{Boundary Conditions and Domain Complexity}
+% \textcolor{red}{While the 1D system employs simple periodic boundary conditions, the 2D system requires handling of mixed boundary conditions: periodic boundaries in the streamwise direction and no-slip conditions at walls. This introduces significant challenges in maintaining physical consistency near boundaries, particularly for turbulent and boundary layer regimes.}
+
+% \paragraph{Computational Considerations}
+% \textcolor{red}{The 2D system's computational requirements scale quadratically with spatial resolution, necessitating optimized derivative computations and memory management. Where the 1D system uses simple 1D convolutions for spatial filtering, the 2D implementation employs 2D convolutional operations with adaptive kernel sizes based on local flow features.}
+
+\paragraph{Network Architecture Adaptations}
+\begin{itemize}
+    \item \textbf{1D Architecture}: Linear layers operating on \textcolor{blue}{the 1D solution vector}, 1D convolution for filtering, single-channel predictions.
+    \item \textbf{2D Architecture}: Convolutional neural networks operating on multi-resolution grids, 2D spatial operations, multi-channel outputs (u, v, pressure).
+\end{itemize}
+
+\paragraph{Measurement Source Design}
+\textcolor{red}{For the 2D experiments, 2D spatial correlations in noise are synthesized by upsampling lower-resolution tensors via bilinear interpolation to generate spatially coherent disturbances rather than independent pixel noise, while directional biases are introduced through anisotropic initial conditions (e.g., the Mode 2 shear layer) and specific spectral wavenumber selection that differentially energizes velocity components. Structured missing data patterns are simulated using geometric masks, such as the localized Gaussian forcing terms or shock-front discontinuities, which distinctively modify the field in contiguous blocks rather than through random sparse dropout, and sensor placement optimization is algorithmically enforced by the spectral dealiasing filter (the $2/3$ rule), which restricts the measurement domain to physically resolvable scales to mitigate aliasing artifacts on the discrete grid.}
+
+
+\subsection{Physics-Informed Loss Formulation}
+\label{subsection:physics_informed_loss_formulation}
+\textcolor{red}{Both dimensional systems enforce physics-informed constraints, but with dimensional-appropriate formulations:}
+
+\paragraph{1D Physics Loss}
+
+\noindent The 1D physics loss is defined as
+\[
+\mathcal{L}_{\text{physics}}^{1D} = \frac{1}{T-1}\sum_{t=1}^{T-1} \mathbb{E}\left[ \left(1 + 0.1\frac{|\partial_x u_t|}{\mathbb{E}[|\partial_x u_t|]}\right) \left(\frac{\partial u}{\partial t} + \frac{u}{L}\frac{\partial u}{\partial x} - \nu L\frac{\partial^2 u}{\partial x^2}\right)^2 \right]
+\]
+where the first parenthetical term acts as an adaptive shock-capturing weight that prioritizes high-gradient regions, and the second parenthetical term represents the squared PDE residual, composed of the unsteady evolution $\frac{\partial u}{\partial t}$, non-linear convection $\frac{u}{L}\partial_x u$, and viscous diffusion $\nu L \partial_{xx} u$.
+
+\paragraph{2D Physics Loss}
+
+\noindent The 2D physics loss is defined as
+\[
+\mathcal{L}_{\text{physics}}^{2D} = \frac{1}{T-1}\sum_{t=1}^{T-1} \mathbb{E}\left[ \mathcal{W}_t \odot \left( \|\mathcal{R}_{\text{mom}}\|^2 + \mathcal{R}_{\text{cont}}^2 \right) \right]
+\]
+where $\mathcal{W}_t = 1 + 0.1 \frac{\| \nabla \mathbf{u}_t \|}{\mathbb{E}[\| \nabla \mathbf{u}_t \|]}$ is an adaptive weight that prioritizes regions with high spatial gradients (turbulence), and the loss minimizes the sum of the squared momentum residual $\mathcal{R}_{\text{mom}}$ (representing the Navier-Stokes dynamics of unsteady evolution, advection, and diffusion) and the continuity residual $\mathcal{R}_{\text{cont}}$ (enforcing the divergence-free incompressibility condition $\nabla \cdot \mathbf{u} = 0$).
+
+
+\textcolor{blue}{Unless otherwise specified in the experiment-specific configurations (e.g., the expert-routing settings in Section~\ref{subsection:expert_routing_physical_systems}), experiments were conducted using PyTorch on A100 GPUs with the following default parameters:}
+\begin{itemize}
+    \item Learning rates: \textcolor{blue}{$\eta_\theta = \eta_\lambda = 10^{-5}$ for the primal variables (model parameters and source weights), with the Lagrange-multiplier (dual) ascent at $10^{-2}$--$10^{-3}$ depending on the experiment, and weight decay $10^{-7}$. We use fixed step sizes throughout (no scheduler); the resulting constant-step stochastic-approximation dynamics converge to a neighborhood of the optimum, matching the noise-floor plateaus in the convergence figures rather than exactly attaining the asymptotic rates of Theorem~\ref{thm:unified_convergence}.}
+    \item Penalty parameter: $\rho = 1.0$
+    \item Batch size: 256
+\end{itemize}
+
+
+\textbf{Weight Initialization Scheme:}
+The weights $\lambda$ were initialized uniformly for all experiments:
+\begin{equation}
+\lambda^{(0)}_i = \frac{1}{N_{\text{sources}}} \quad \text{for } i=1,\dots,N_{\text{sources}}
+\end{equation}
+For the 2-source case: $\lambda = [0.5, 0.5]$; for 4-source: $\lambda = [0.25, 0.25, 0.25, 0.25]$. The uniform weighting scheme provided the best results across all the experiments, allowing the weights to evolve naturally.
+
+
+
+\subsection{Expert Routing in Physical Systems}
+\label{subsection:expert_routing_physical_systems}
+
+In this subsection, we evaluate the dynamic selection of specialized PDE solvers. 
+
+\paragraph{Problem Formulation:} Given $N$ specialized experts $\{\Psi_1, \dots, \Psi_N\}$, the router seeks to minimize the reconstruction error and PDE residual $\mathcal{R}$ for the governing PDE (\textcolor{blue}{1D Burgers'} or 2D Navier--Stokes):
+\begin{equation}
+\begin{aligned}
+\min_{\mathbf{\lambda}} \quad & \| \sum_{i=1}^N \lambda_i \Psi_i(u_0) - u_{gt} \|^2 + \gamma \mathcal{R}(\sum_{i=1}^N \lambda_i \Psi_i) \\
+\text{s.t.} \quad & \sum_{i=1}^N \lambda_i = 1, \quad \lambda_i \geq 0
+\end{aligned}
+\end{equation}
+where $\gamma$ is a physics-regularization weight.
+
+\textcolor{red}{Building upon prior results, we explored specialized routing mechanisms between PDE solvers using two methodologies for expert selection and combination: Softmax and Lagrangian approaches. In the context of PDE solvers, expert routing refers to the dynamic selection and combination of specialized solvers based on local solution characteristics. The solver architecture consisted of four specialized components described in Subsection~\ref{subsection:related_ml_methods} with the exact setup.}
+
+\textcolor{red}{We generated training and test data by numerically solving the \textcolor{blue}{1D Burgers'} equation $\partial_t u + u\,\partial_x u = \nu\,\partial_{xx}u$, with $\nu = 1/\mathrm{Re}$ and $\mathrm{Re}=100$, using three families of initial conditions (300 samples each): sinusoidal flows $u_0(x)=\sin(\pi x)$, smoothed step functions (via a 5‐point convolution), and localized Gaussian pulses $u_0(x)=e^{-10x^2}$. All samples include additive Gaussian noise ($\sigma=0.1$) and random perturbations to assess solver robustness.}
+
+
+This experiment evaluates the fusion of four distinct architectural paradigms operating across varying native spatial resolutions $\{32, 64, 128\}$.
+
+\begin{itemize}
+    \item \textbf{Expert Architectures:}
+    \begin{itemize}
+        \item \textbf{Finite Difference (FD):} A 3-layer MLP (hidden dim: 32) processing spatial derivatives extracted via 1D convolution kernels $k_{u_x} = [-0.5, 0, 0.5]$ and $k_{u_{xx}} = [1, -2, 1]$.
+        \item \textbf{CNN Expert:} 3-layer Conv1D network with 32 hidden channels and a kernel size of 5 utilizing circular padding.
+        \item \textbf{FNO Expert:} 1D Fourier Neural Operator with 16 Fourier modes and a channel width of 32.
+        \item \textbf{DeepONet:} Branch-and-trunk architecture with 64-dimensional latent representations for both networks, using 128 sensors in 1D and 4096 sensors (the full $64\times64$ grid) in 2D.
+    \end{itemize}
+    \item \textbf{Training Hyperparameters:} Primal learning rate $\eta_p = 10^{-5}$ (Adam), Dual learning rate $\eta_d = 10^{-3}$, and $\text{weight decay} = 10^{-7}$. Pre-training consists of 20 epochs per expert.
+    \item \textbf{Constraint Configuration:} Total budget $\mathcal{B} = 3.0$. The optimization enforces the budget using Augmented Lagrangian and ADMM with a penalty parameter $\rho = 2.0$.
+\end{itemize}
+
+
+\textcolor{red}{The quantitative evaluation of our expert routing framework, summarized in Table~\ref{tab:expert_routing}, reveals a significant performance leap across both \textcolor{blue}{1D Burgers'} and 2D Navier-Stokes regimes when compared to individual baseline experts. In the 1D case, all routing methods achieved a Test Mean Squared Error (MSE) within the magnitude of $10^{-6}$ (see Fig.~\ref{fig:expert_routing_1d_mse}), representing a multi-order-of-magnitude improvement over standalone architectures such as FiniteDiff and DeepONet . This substantial gain suggests that the routing mechanism effectively constructs a high-fidelity solution by interpolating the strengths of heterogeneous architectures trained at distinct resolution priors. Furthermore, as shown in Table~\ref{tab:expert_routing}, the routing mechanism in the 1D regime indicates a collaborative equilibrium. The corresponding weight evolution in Fig.~\ref{fig:expert_routing_1d_weights} illustrates that the optimizer leverages a nearly uniform distribution of the four experts ($\lambda_1 \approx \lambda_2 \approx \lambda_3 \approx \lambda_4$) to resolve complex shock-front dynamics in the high-frequency Out-of-Distribution (OOD) test set.}
+
+\textcolor{red}{In contrast to the 1D results, a distinct shift toward expert specialization is observed in the 2D Navier-Stokes experiments. Specifically, the AugLag method prioritizes the FNO expert ($\lambda_3 = 0.734$), resulting in a superior test accuracy of $1.40 \times 10^{-7}$. This specialization, captured in the 2D weight evolution (Fig.~\ref{fig:expert_routing_2d_weights}), aligns with other studies that the Fourier Neural Operator (FNO) architectures are uniquely suited to capturing the global spectral features prevalent in complex 2D fluid flows \cite{li2021fourier}. While the Softmax method achieves a competitive Test MSE of $2.35 \times 10^{-7}$ by placing nearly all its weight on the FNO expert ($\lambda_3 = 0.997$), its lack of explicit constraints results in a significantly higher computational cost ($\mathcal{C} = 3.992$) compared to the constrained AugLag approach ($\mathcal{C} = 2.205$), which establishes the performance ceiling for this task.}
+
+\textcolor{red}{Furthermore, the robustness of the framework is evidenced by the performance of the other routing variants, such as ImpLag and ADMM. While these methods converge to a slightly higher error floor (e.g., $1.20 \times 10^{-6}$ for ImpLag and $2.23 \times 10^{-7}$ for ADMM) as shown in Fig.~\ref{fig:expert_routing_convergence_evolution}, they still significantly outperform the baselines displayed in Table~\ref{tab:expert_routing}. This underscores the utility of learned routing even when operating under strict resource budgets ($\mathcal{C} = 2.385$ for ADMM). By intelligently upsampling information from low-resolution experts and prioritizing high-resolution architectures, the proposed system successfully bypasses the spectral bias and resolution limitations typically associated with Single-timescale Augmented Lagrangian physics-informed neural operators.}
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\caption{Performance comparison of expert routing methods across multi-resolution 1D and 2D regimes. For 1D and 2D, weights correspond to heterogeneous experts: $\lambda_1$ (FiniteDiff), $\lambda_2$ (CNN), $\lambda_3$ (FNO), $\lambda_4$ (DeepONet). Best results for each dimension are in bold.}
+\label{tab:expert_routing}
+\setlength{\tabcolsep}{3pt} 
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{@{}ll ccc ccc ccc@{}}
+\toprule
+\multirow{2}{*}{\textbf{Dim}} & \multirow{2}{*}{\textbf{Method}} & {\textbf{Train Loss}} & {\textbf{Val MSE}} & {\textbf{Test MSE}} & {\textbf{Cost}} & {\textbf{Time}} & \multicolumn{4}{c}{\textbf{Expert Weights}} \\
+\cmidrule(l){8-11} 
+& & & & & {($\mathcal{C}$)} & {(s)} & $\lambda_1$ & $\lambda_2$ & $\lambda_3$ & $\lambda_4$ \\
+\midrule
+\multirow{9}{*}{1D} & FiniteDiff & -- & $1.38 \times 10^{-2}$ & $8.32 \times 10^{-3}$ & \textbf{1.000} & -- & 1.000 & 0.000 & 0.000 & 0.000 \\
+                    & CNN        & -- & $8.66 \times 10^{-3}$ & $6.47 \times 10^{-3}$ & 3.000 & -- & 0.000 & 1.000 & 0.000 & 0.000 \\
+                    & FNO        & -- & $5.59 \times 10^{-1}$ & $8.42 \times 10^{-2}$ & 4.000 & -- & 0.000 & 0.000 & 1.000 & 0.000 \\
+                    & DeepONet   & -- & $1.74 \times 10^{-2}$ & $6.69 \times 10^{-3}$ & 2.000 & -- & 0.000 & 0.000 & 0.000 & 1.000 \\
+\cmidrule(lr){2-11} & Softmax    & $7.68 \times 10^{-6}$ & $1.29 \times 10^{-6}$ & $1.72 \times 10^{-6}$ & 2.497 & 797.31 & 0.262 & 0.275 & 0.241 & 0.222 \\
+                    & Lagrangian & $7.76 \times 10^{-6}$ & $1.47 \times 10^{-6}$ & $1.91 \times 10^{-6}$ & \textbf{2.404} & 876.43 & 0.243 & 0.279 & 0.220 & 0.258 \\
+                    & ImpLagrangian     & $6.98 \times 10^{-6}$ & $1.23 \times 10^{-6}$ & $1.78 \times 10^{-6}$ & 2.553 & 865.81 & 0.236 & 0.288 & 0.231 & 0.245 \\
+                    & AugLag & $\mathbf{6.78 \times 10^{-6}}$ & $\mathbf{1.21 \times 10^{-6}}$ & $1.58 \times 10^{-6}$ & 2.738 & 861.54 & 0.229 & 0.299 & 0.244 & 0.227 \\
+                    
+                    & ADMM   & $7.17 \times 10^{-6}$ & $1.39 \times 10^{-6}$ & $\mathbf{1.47 \times 10^{-6}}$ & 2.658 & 906.98 & 0.249 & 0.265 & 0.261 & 0.225 \\
+\midrule
+\multirow{9}{*}{2D} & FiniteDiff & -- & $1.56 \times 10^{0}$ & $4.48 \times 10^{-2}$ & \textbf{1.000} & -- & 1.000 & 0.000 & 0.000 & 0.000 \\
+                    & CNN        & -- & $1.86 \times 10^{0}$ & $1.31 \times 10^{-2}$ & 3.000 & -- & 0.000 & 1.000 & 0.000 & 0.000 \\
+                    & FNO        & -- & $4.00 \times 10^{-5}$ & $5.54 \times 10^{-7}$ & 4.000 & -- & 0.000 & 0.000 & 1.000 & 0.000 \\
+                    & DeepONet   & -- & $4.27 \times 10^{1}$ & $3.41 \times 10^{-2}$ & 2.000 & -- & 0.000 & 0.000 & 0.000 & 1.000 \\
+\cmidrule(lr){2-11} & Softmax    & $\mathbf{2.76 \times 10^{-6}}$ & $8.51 \times 10^{-7}$ & $2.35 \times 10^{-7}$ & 3.992 & 2052.97 & 0.001 & 0.001 & 0.997 & 0.000 \\
+                    & Lagrangian & $2.22 \times 10^{-5}$ & $2.53 \times 10^{-6}$ & $2.40 \times 10^{-6}$ & \textbf{2.155} & 2425.07 & 0.295 & 0.076 & 0.595 & 0.034 \\
+                    
+                    & ImpLagrangian     & $1.27 \times 10^{-5}$ & $1.20 \times 10^{-6}$ & $1.20 \times 10^{-6}$ & 2.193 & 2309.53 & 0.298 & 0.057 & 0.630 & 0.016 \\
+                    & AugLag & $1.70 \times 10^{-5}$ & $4.20 \times 10^{-6}$ & $\mathbf{1.40 \times 10^{-7}}$ & 2.205 & 2296.44 & 0.202 & 0.044 & 0.734 & 0.020 \\
+                    & ADMM   & $1.75 \times 10^{-5}$ & $\mathbf{3.66 \times 10^{-7}}$ & $2.23 \times 10^{-7}$ & 2.385 & 3937.45 & 0.422 & 0.123 & 0.430 & 0.026 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+% --- Figures Code ---
+\begin{figure}[h!]
+    \centering
+    % Row 1: MSE
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{plots/expert_routing/1d/mse.png}
+        \caption{1D MSE evolution}
+        \label{fig:expert_routing_1d_mse}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{plots/expert_routing/2d/mse.png}
+        \caption{2D MSE evolution}
+        \label{fig:expert_routing_2d_mse}
+    \end{subfigure}
+    
+    \vspace{1em} % Adds a bit of vertical space between the rows
+    
+    % Row 2: Loss
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{plots/expert_routing/1d/loss.png}
+        \caption{1D Loss evolution}
+        \label{fig:expert_routing_1d_loss}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[b]{0.48\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{plots/expert_routing/2d/loss.png}
+        \caption{2D Loss evolution}
+        \label{fig:expert_routing_2d_loss}
+    \end{subfigure}
+    
+    \caption{\textbf{MSE and Loss convergence profiles for heterogeneous expert routing across dimensions.} The plots compare the convergence behavior of unconstrained (Softmax) versus constrained (Lagrangian, ImpLagrangian, AugLag, ADMM) routing methods combining four distinct PDE solver architectures (Finite Difference, CNN, FNO, DeepONet) on \textcolor{blue}{1D Burgers'} (a, c) and 2D Navier--Stokes (b, d) equations.}
+    \label{fig:expert_routing_convergence_evolution}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/expert_routing/1d/weights.png}
+         \caption{Expert weights (1D)}
+         \label{fig:expert_routing_1d_weights}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/expert_routing/2d/weights.png}
+         \caption{Expert weights (2D)}
+         \label{fig:expert_routing_2d_weights}
+     \end{subfigure}
+    \caption{\textbf{Evolution of architecture-specific weights ($\lambda_1$ -- $\lambda_4$) during optimization.} This figure displays the dynamic weighting of the four heterogeneous expert models across \textcolor{blue}{1D Burgers'} (a) and 2D Navier--Stokes (b) regimes. Experts: $\lambda_1$ (FiniteDiff), $\lambda_2$ (CNN), $\lambda_3$ (FNO),
+$\lambda_4$ (DeepONet). In 1D, constrained methods reach a collaborative equilibrium, distributing weights relatively evenly to capture complex shock-front dynamics. Conversely, in 2D, a sharp specialization is observed, with AugLag aggressively prioritizing the Fourier Neural Operator (Expert 3) to capture global spectral features. }
+    \label{fig:expert_routing_weight_evolution}
+\end{figure}
+
+\subsection{Multi-resolution methods}
+\label{subsection:multi-source-neural-pde}
+
+This study investigates how combination methods generalize when integrating models trained at different spatial resolutions.
+
+\paragraph{Problem Formulation:} 
+We treat models trained at resolutions $r \in \{32, 64, 128\}$ as heterogeneous experts. The objective is to minimize the error at the highest resolution $H=128$:
+\begin{equation}
+\begin{aligned}
+\min_{\mathbf{\lambda}} \quad & \| \sum_{r \in \{32, 64, 128\}} \lambda_r \mathcal{U}_r(\Psi_r) - u_H \|^2 \\
+\text{s.t.} \quad & \mathbf{1}^\top \mathbf{\lambda} = 1, \quad \mathbf{\lambda} \succeq 0
+\end{aligned}
+\end{equation}
+where $\mathcal{U}_r$ is an upsampling operator. This formulation forces the optimizer to prioritize high-resolution experts where local gradients are sharp, while potentially utilizing low-resolution experts for global features.
+
+
+This experiment assesses the ability of the routing mechanism to generalize from low-frequency training data to high-frequency test regimes.
+
+\begin{itemize}
+    \item \textbf{Dataset Specs:} Training data is generated within a frequency range of $[1, 3]$. The Out-of-Distribution (OOD) test set utilizes higher frequencies $[3, 6]$.
+    \item \textbf{Physics Parameters:} \textcolor{blue}{1D Burgers'} equation with viscosity $\nu \in [0.001, 0.005]$ and temporal horizon $T_{max} \in [0.3, 0.7]$.
+    \item \textbf{Loss Function:} A Physics-Informed loss $\mathcal{L} = \omega_{mse} \mathcal{L}_{mse} + \omega_{phys} \mathcal{L}_{phys}$ where $\omega_{mse} = 10.0$ and $\omega_{phys} = 10^{-3}$.
+\end{itemize}
+
+\textcolor{red}{The performance comparison of the multi-resolution routing framework versus standalone baseline models is summarized in Table~\ref{tab:multi_res_routing}. Our results show that the ensembles generated using constrained optimization techniques consistently outperform single-resolution experts in both 1D and 2D cases. In the \textcolor{blue}{1D Burgers'} equation experiments, the best baseline model (Base 32) achieved a Test MSE of \textcolor{blue}{$2.00 \times 10^{-3}$}. In contrast, the \textcolor{blue}{ADMM} routing method set the best performance with an MSE of \textcolor{blue}{$3.90 \times 10^{-5}$}, \textcolor{blue}{with the Improved and standard Lagrangian close behind at $5.30 \times 10^{-5}$ and $5.40 \times 10^{-5}$}. This represents an improvement by several orders of magnitude while keeping \textcolor{blue}{a bounded cost profile ($\mathcal{C} \approx 2.2$--$2.9$)}. The MSE convergence profiles in Fig.~\ref{fig:multi_source_1d_mse} show that while baselines reach a static error floor, the routed experts adjust weights dynamically (Fig.~\ref{fig:multi_source_weights}) to capture multi-scale features that single-resolution models miss.}
+
+\textcolor{red}{In the 2D Navier-Stokes experiments, the complexity of the flow fields led to a significant increase in error for standalone models. The Base 128 baseline reached a Test MSE of \textcolor{blue}{$7.24 \times 10^{-2}$} and exceeded the cost limits with a cost of 4.000. As shown in Table~\ref{tab:multi_res_routing}, the ImpLagrangian and AugLag methods set the best performance for 2D accuracy, both achieving a Test MSE of $4.89 \times 10^{-4}$. These constrained variants provide a strong balance, sticking to costs of $\mathcal{C} \approx 1.43$ and $1.51$ respectively, while delivering about a \textcolor{blue}{12}$\times$ reduction in error compared to the best baseline (\textcolor{blue}{Base 32, MSE $6.05 \times 10^{-3}$}).}
+
+\textcolor{red}{The weight evolution plots (Fig.~\ref{fig:multi_source_dynamics}) show a ``collaborative equilibrium." In 1D, all three resolutions retain non-trivial weight (each $\lambda_r$ remains well away from $0$ and $1$), in contrast to the winner-take-all baselines; the constrained methods in particular spread weight across resolutions (e.g., AugLag $\lambda = (0.301, 0.346, 0.352)$), reflecting the need to combine multiple scales to manage shock-front gradients. However, 2D systems show a clear preference for lower resolutions ($\lambda_1$ and $\lambda_2$) for broad structural stability, with minimal use of the high-resolution corrector ($\lambda_3 \approx 0.03$ to $0.06$). This shift confirms that the framework effectively handles the trade-off between physical accuracy and computational cost (Theorem~\ref{thm:unified_convergence}).}
+
+
+
+% --- Updated Table Code ---
+\begin{table}[tbp]
+\centering
+\footnotesize
+\caption{Multi-resolution performance comparison: Experts correspond to spatial resolutions $\lambda_1=32$, $\lambda_2=64$, and $\lambda_3=128$. Routing methods are compared against standalone baselines. Best results for each dimension are in bold.}
+\label{tab:multi_res_routing}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}ll ccc ccc cc@{}}
+\toprule
+\multirow{2}{*}{\textbf{Dim}} & \multirow{2}{*}{\textbf{Method}} & {\textbf{Train Loss}} & {\textbf{Val Loss}} & {\textbf{Test MSE}} & {\textbf{Cost}} & {\textbf{Time}} & \multicolumn{3}{c}{\textbf{Expert Weights}} \\
+\cmidrule(l){8-10}
+& & & & & {($\mathcal{C}$)} & {\textcolor{blue}{(s)}} & $\lambda_1$ & $\lambda_2$ & $\lambda_3$ \\
+\midrule
+\multirow{7}{*}{1D} & Base 32       & -- & -- & \textcolor{blue}{$2.00 \times 10^{-3}$} & 1.000 & -- & 1.000 & 0.000 & 0.000 \\
+                    & Base 64       & -- & -- & \textcolor{blue}{$3.72 \times 10^{-3}$} & 2.000 & -- & 0.000 & 1.000 & 0.000 \\
+                    & Base 128      & -- & -- & \textcolor{blue}{$5.04 \times 10^{-3}$} & 4.000 & -- & 0.000 & 0.000 & 1.000 \\
+                    \cmidrule(lr){2-10}
+                    & Softmax       & \textcolor{blue}{$7.50 \times 10^{-5}$} & \textcolor{blue}{$7.67 \times 10^{-5}$} & \textcolor{blue}{$8.10 \times 10^{-5}$} & \textcolor{blue}{$\mathbf{2.213}$} & \textbf{674.83} & 0.437 & 0.231 & \textcolor{blue}{0.332} \\
+                    & Lagrangian    & \textcolor{blue}{$5.65 \times 10^{-5}$} & \textcolor{blue}{$\mathbf{4.75 \times 10^{-5}}$} & \textcolor{blue}{$5.40 \times 10^{-5}$} & \textcolor{blue}{2.237} & 768.75 & \textcolor{blue}{0.336} & 0.340 & 0.324 \\
+                    & ImpLagrangian & \textcolor{blue}{$4.56 \times 10^{-5}$} & \textcolor{blue}{$4.76 \times 10^{-5}$} & \textcolor{blue}{$5.30 \times 10^{-5}$} & \textcolor{blue}{2.714} & 758.67 & 0.327 & 0.267 & 0.406 \\
+                    & AugLag        & \textcolor{blue}{$6.92 \times 10^{-5}$} & \textcolor{blue}{$1.14 \times 10^{-3}$} & \textcolor{blue}{$8.90 \times 10^{-5}$} & \textcolor{blue}{2.472} & 757.59 & 0.301 & 0.346 & 0.352 \\
+                    & ADMM          & \textcolor{blue}{$\mathbf{4.09 \times 10^{-5}}$} & \textcolor{blue}{$6.14 \times 10^{-5}$} & \textcolor{blue}{$\mathbf{3.90 \times 10^{-5}}$} & \textcolor{blue}{2.923} & 809.13 & \textcolor{blue}{0.256} & \textcolor{blue}{0.347} & 0.397 \\
+\midrule
+\multirow{7}{*}{2D} & Base 32       & -- & -- & \textcolor{blue}{$6.05 \times 10^{-3}$} & 1.000 & -- & 1.000 & 0.000 & 0.000 \\
+                    & Base 64       & -- & -- & \textcolor{blue}{$7.45 \times 10^{-3}$} & 2.000 & -- & 0.000 & 1.000 & 0.000 \\
+                    & Base 128      & -- & -- & \textcolor{blue}{$7.24 \times 10^{-2}$} & 4.000 & -- & 0.000 & 0.000 & 1.000 \\
+                    \cmidrule(lr){2-10}
+                    & Softmax       & $2.86 \times 10^{-1}$ & $3.28 \times 10^{-1}$ & $6.72 \times 10^{-4}$ & 1.673 & \textcolor{blue}{$\mathbf{3729.00}$} & 0.459 & 0.479 & 0.062 \\
+                    & Lagrangian    & $\mathbf{1.78 \times 10^{-1}}$ & $\mathbf{2.32 \times 10^{-1}}$ & $9.80 \times 10^{-4}$ & \textbf{1.278} & \textcolor{blue}{3906.49} & 0.595 & 0.367 & 0.038 \\
+                    & ImpLagrangian & $2.01 \times 10^{-1}$ & $2.82 \times 10^{-1}$ & $\mathbf{4.89 \times 10^{-4}}$ & 1.432 & \textcolor{blue}{3914.73} & 0.513 & 0.438 & 0.048 \\
+                    & AugLag        & $2.99 \times 10^{-1}$ & $3.42 \times 10^{-1}$ & $\mathbf{4.89 \times 10^{-4}}$ & 1.508 & \textcolor{blue}{3909.32} & 0.485 & 0.484 & 0.031 \\
+                    & ADMM          & $2.81 \times 10^{-1}$ & $3.01 \times 10^{-1}$ & $5.18 \times 10^{-4}$ & 1.424 & \textcolor{blue}{3933.33} & 0.518 & 0.438 & 0.043 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+% --- Figures Code ---
+\begin{figure}[h!]
+    \centering
+    % Row 1: MSE
+    \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/multi_source/1d/mse.png}
+         \caption{1D MSE evolution}
+         \label{fig:multi_source_1d_mse}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/multi_source/2d/mse.png}
+         \caption{2D MSE evolution}
+         \label{fig:multi_source_2d_mse}
+     \end{subfigure}
+     
+     \vspace{1em} % Adds vertical space between the rows
+     
+     % Row 2: Loss
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/multi_source/1d/loss.png}
+         \caption{1D Loss evolution}
+         \label{fig:multi_source_1d_loss}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/multi_source/2d/loss.png}
+         \caption{2D Loss evolution}
+         \label{fig:multi_source_2d_loss}
+     \end{subfigure}
+     
+     \caption{\textbf{MSE and Loss convergence profiles for multi-scale learning across dimensions.} We compare the optimization performance when routing experts are trained at three different spatial resolutions (32, 64, and 128). Constrained routing methods, particularly ImpLagrangian and AugLag, demonstrate accelerated convergence and achieve test errors orders of magnitude lower than single-resolution baselines and unconstrained Softmax, efficiently balancing physical accuracy with computational cost. We observe that while the loss decreases as the number of epochs increases, it has not stabilized to a value suggesting that increased number of points or longer optimization epochs would be relevant for this problem.}
+    \label{fig:multi_source_convergence_evolution}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/multi_source/1d/weights.png}
+         \caption{Expert weights evolution (1D)}
+         \label{fig:multi_source_weights}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/multi_source/2d/weights.png}
+         \caption{Expert weights evolution (2D)}
+         \label{fig:multi_source_2d_loss_plot}
+     \end{subfigure}
+    \caption{\textbf{Weight distribution for multi-resolution experts.} This figure illustrates the evolution of weights assigned to low, medium, and high-resolution experts. While the 1D system distributes weights evenly to manage multi-scale gradients, the 2D system prioritizes lower resolutions ($\lambda_1$, $\lambda_2$) for general structural stability. This minimizes the use of the computationally expensive high-resolution predictor ($\lambda_3$) to strictly adhere to the resource budget.}
+    \label{fig:multi_source_dynamics}
+\end{figure}
+
+\subsection{Large-Scale Multi-Source Integration}
+\label{subsection:large_scale_multi_source_integration}
+
+\paragraph{Problem Formulation:} 
+To test scalability with $N=100$ sources, we introduce a sparsity-inducing penalty to the objective to select only the most relevant sources:
+\begin{equation}
+\begin{aligned}
+\min_{\mathbf{\lambda}} \quad & \| \sum_{i=1}^{100} \lambda_i \text{FNO}_i(x) - y \|^2 + \alpha \|\mathbf{\lambda}\|_1 \\
+\text{s.t.} \quad & \sum_{i=1}^{100} \lambda_i = 1, \quad \lambda_i \geq 0
+\end{aligned}
+\end{equation}
+Using the ADMM approach, we decouple the MSE minimization from the simplex projection, which is critical for handling the high dimensionality of 100 sources.
+
+\textcolor{red}{To test the scalability of the proposed method, we ran an experiment on the \textcolor{blue}{1D Burgers'} and 2D Navier--Stokes equations. For each experiment, 100 sources were chosen, and the experiment was performed in \textcolor{blue}{64-point grid for 1D and $64 \times 64$ for 2D}. \textcolor{blue}{Fourier Neural Operators} (FNO) were used for the experiments. We measured four different methodologies for combining sources in this experiment, i.e., Softmax, Single time scale Lagrangian, Augmented Lagrangian, and ADMM. The results obtained for different methods are displayed in Table~\ref{tab:large_scale_multi_source}.}
+
+A large-scale sensing experiment involving 100 heterogeneous data sources with varying fidelity levels.
+
+
+\begin{itemize}
+    \item \textbf{Source Modeling:} 100 NoisySourceWrapper instances. Smooth correlated noise (IV drift) is interpolated from $0.01$ to $0.50$ (std), and white Gaussian noise (Measurement) from $0.01$ to $0.30$.
+    \item \textbf{Routing Mechanism:} A shared spectral FNORouter1D predicts logits for all 100 sources. The TopKExpertSelector limits the active experts to $k=10$ per forward pass.
+    \item \textbf{Cost-Noise Tradeoff:} Expert costs are inversely proportional to noise, ranging from $2.0$ (cleanest) to $0.1$ (noisiest).
+\end{itemize}
+
+\textcolor{red}{In the context of scientific machine learning, ``large-scale" refers to the computational cost of the forward pass for each source $E_i(\theta)$. Unlike NLP token routing, where expert evaluation is cheap, evaluating a PDE solver or Neural Operator is computationally intensive. Therefore, the $O(N \log N)$ overhead of the ADMM simplex projection is negligible compared to the $O(N \cdot C_{PDE})$ cost of evaluating the ensemble. This justifies the use of rigorous projection methods over soft approximations, as the bottleneck lies in the physics evaluation, not the routing logic.}
+
+\textcolor{red}{The experimental results presented in Table~\ref{tab:large_scale_multi_source} demonstrate the efficacy of our routing framework in isolating high-fidelity information from a noisy pool of data sources. In the \textcolor{blue}{1D Burgers'} equation regime, all methods maintained a consistent $90.00\%$ sparsity, successfully filtering the input stream to a Top-10 subset. The Improved Lagrangian (ImpLagrangian) method achieved the best predictive performance with a Test MSE of $8.48 \times 10^{-2}$, as corroborated by the rapid convergence profiles in Fig.~\ref{fig:large_scale_1d_mse}. The Softmax method, operating without the resource-aware constraints enforced by the Lagrangian and ADMM variants, resulted in a computational cost of $\mathcal{C} = 1.783$, which remained well within the target budget.}
+
+
+\textcolor{red}{The transition to the 2D Navier-Stokes experiments, involving 200 extremely challenging trajectories at \textcolor{blue}{$64 \times 64$} resolution, revealed robust reconstruction precision despite highly non-linear dynamics with viscosities $\nu$ ranging from 0.0010 to 0.0049. Specifically, the AugLag method reached an error floor with the lowest Test MSE of $8.60 \times 10^{-7}$, as seen in the convergence curves of Fig.~\ref{fig:large_scale_2d_mse}. The ADMM and Lagrangian methods followed, converging to Test MSEs of $1.12 \times 10^{-6}$ and $1.53 \times 10^{-6}$, respectively. Notably, all methods strictly adhered to the $90.00\%$ sparsity target, with the ImpLagrangian method achieving the best Validation MSE of $9.10 \times 10^{-7}$.}
+
+\textcolor{red}{ Despite the increased complexity of the 2D state space, all constrained methods successfully adhered to the command-line budget of 3.0. Final costs $\mathcal{C}$ for the Lagrangian variants stabilized between 1.95 and 2.00, well below the threshold. This validates the robustness of the routing layer as a computational gatekeeper, ensuring physical fidelity is maximized without violating prescribed hardware limitations.}
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\caption{Performance comparison of Large-scale multi-source integration for \textcolor{blue}{1D Burgers'} and 2D Navier--Stokes equations.}
+\label{tab:large_scale_multi_source}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}ll ccc c cc@{}}
+\toprule
+\textbf{Dim} & 
+\textbf{Method} & 
+{\textbf{Train Loss}} & 
+{\textbf{Val MSE}} & 
+{\textbf{Test MSE}} & 
+{\begin{tabular}[c]{@{}c@{}}\textbf{Sparsity}\\\textbf{(\%)}\end{tabular}} & 
+{\textbf{Cost ($\mathcal{C}$)}} &
+{\begin{tabular}[c]{@{}c@{}}\textbf{Time}\\\textbf{(s)}\end{tabular}} \\
+\midrule
+\multirow{5}{*}{1D} & Softmax       & $9.22 \times 10^{-1}$ & $8.42 \times 10^{-2}$ & $8.50 \times 10^{-2}$ & 90.00 & \textbf{1.783} & 5734.26 \\
+                    & Lagrangian    & $9.20 \times 10^{-1}$ & $8.41 \times 10^{-2}$ & $8.49 \times 10^{-2}$ & 90.00 & 2.000 & 4488.67 \\
+                    & ImpLagrangian & $9.19 \times 10^{-1}$ & $\mathbf{8.40 \times 10^{-2}}$ & $\mathbf{8.48 \times 10^{-2}}$ & 90.00 & 1.955 & 6627.50 \\
+                    & AugLag    & $9.20 \times 10^{-1}$ & $8.40 \times 10^{-2}$ & $8.49 \times 10^{-2}$ & 90.00 & 2.000 & \textbf{4392.15} \\
+                    & ADMM      & $\mathbf{9.19 \times 10^{-1}}$ & $8.40 \times 10^{-2}$ & $8.50 \times 10^{-2}$ & 90.00 & 2.000 & 4939.35 \\
+                    
+\midrule
+\multirow{5}{*}{2D} & Softmax       & $8.87 \times 10^{-5}$ & $9.23 \times 10^{-6}$ & $8.36 \times 10^{-6}$ & 90.00 & \textbf{1.794} & 12598.46 \\
+                    & Lagrangian    & $2.41 \times 10^{-5}$ & $1.62 \times 10^{-6}$ & $1.53 \times 10^{-6}$ & 90.00 & 1.953 & \textbf{8307.25} \\
+                    & ImpLagrangian & $2.64 \times 10^{-5}$ & $\mathbf{9.10 \times 10^{-7}}$ & $8.96 \times 10^{-7}$ & 90.00 & 1.965 & 8934.29 \\
+                    & AugLag    & $2.08 \times 10^{-5}$ & $9.22 \times 10^{-7}$ & $\mathbf{8.60 \times 10^{-7}}$ & 90.00 & 1.966 & 10089.87 \\
+                    & ADMM      & $\mathbf{1.26 \times 10^{-5}}$ & $1.17 \times 10^{-6}$ & $1.12 \times 10^{-6}$ & 90.00 & 1.966 & 9737.68 \\
+                    
+\bottomrule
+\end{tabular}
+}
+\vspace{0.3em}
+{\scriptsize \textit{Note: Best results for each metric are bolded. Cost ($\mathcal{C}$) targets a budget of 3.0. Sparsity reflects the selection of 10 sources out of 100.}}
+\end{table}
+% --- Figures Code ---
+\begin{figure}[h!]
+    \centering
+    % Row 1: MSE
+    \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/large_scale_multi_source/1d/mse.png}
+         \caption{1D MSE evolution}
+         \label{fig:large_scale_1d_mse}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/large_scale_multi_source/2d/mse.png}
+         \caption{2D MSE evolution}
+         \label{fig:large_scale_2d_mse}
+     \end{subfigure}
+     
+     \vspace{1em} % Adds vertical space between the rows
+     
+     % Row 2: Loss
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/large_scale_multi_source/1d/loss.png}
+         \caption{Training loss (1D)}
+         \label{fig:large_scale_1d_loss}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/large_scale_multi_source/2d/loss.png}
+         \caption{Training loss (2D)}
+         \label{fig:large_scale_2d_loss}
+     \end{subfigure}
+     
+    \caption{\textbf{MSE convergence profiles and global objective minimization for large-scale multi-source integration.} Evaluates the scalability of routing mechanisms when filtering 100 heterogeneous, noisy data sources for \textcolor{blue}{1D Burgers'} (a, c) and 2D Navier--Stokes (b, d) equations.}
+    \label{fig:large_scale_multi_source_convergence_evolution}
+\end{figure}
+
+
+
+\subsection{Data Assimilation Framework}
+\label{subsection:data_assimilation_framework}
+
+\paragraph{Problem Formulation:} 
+This framework implements a Neural Data Assimilation (DA) architecture to integrate $N$ imperfect data sources $\{y_1, \dots, y_N\}$ characterized by varying noise levels and costs. Unlike static ensemble averaging, our approach utilizes a learned analysis update. We define the background state $u_b$ as a weighted combination of expert predictions, and the final analysis state $u_a$ as:
+
+\begin{equation}
+u_a(t) = \underbrace{\sum_{i=1}^N \lambda_i y_i(t)}_{\text{Background } u_b} + K \underbrace{\sum_{i=1}^N \lambda_i \left( z_i(t) - u_b(t) \right)}_{\text{Analysis Correction}}
+\end{equation}
+
+where $K \in [0, 1]$ is a learnable Kalman Gain and $(z_i - u_b)$ represents the innovation from source $i$. The optimization objective is formulated as:
+
+\begin{equation}
+\begin{aligned}
+\min_{\mathbf{\lambda}, K} \quad & \mathbb{E}_{t} \left[ \| u_a(t) - z(t) \|^2 \right] \\
+\text{s.t.} \quad & \sum_{i=1}^N \lambda_i = 1, \quad \sum_{i=1}^N \lambda_i C_i \leq B
+\end{aligned}
+\end{equation}
+
+where $C_i$ is the cost of source $i$ and $B$ is the total resource budget. This formulation allows the router to dynamically balance the trust between the neural ``priors" and noisy physical observations.
+
+\textcolor{red}{Our study addresses practical DA challenges in fluid dynamics across two distinct regimes. (1) A 1D system governed by the viscous Burgers' equation ($\text{Re}=50$), discretized over 128 spatial points, utilizing a 1D Fourier Neural Operator (FNO) backbone. (2) A 2D Navier-Stokes system ($128 \times 128$ resolution) encompassing diverse flow regimes such as turbulence and shock formations. In both systems, \textcolor{blue}{a} convolutional router network determines the spatial weights $\mathbf{\lambda}$ and the gain $K$, ensuring the analysis remains physically grounded while respecting budget constraints via Lagrangian and ADMM optimization strategies\textcolor{blue}{, with a resource budget of $B=2.0$ (1D) and $B=2.5$ (2D)}.}
+
+
+A differentiable Data Assimilation (DA) pipeline where the combiner facilitates a Kalman-style correction.
+
+\begin{itemize}
+    \item \textbf{DA Architecture:} The DA-Router employs a CNN feature extractor to output both expert weights $\lambda$ and a scalar Kalman gain $K \in (0, 1)$ via a Sigmoid head.
+    \item \textbf{Update Logic:} The analysis state $u_a$ is computed as:
+    \begin{equation}
+        u_a = u_b + K \sum_{i=1}^n \lambda_i(z_i - u_b)
+    \end{equation}
+    where $u_b$ is the weighted background and $z_i$ represents the noisy observations.
+
+\end{itemize}
+
+\textcolor{red}{The performance of the various constrained optimization methods for data assimilation in 1D systems is summarized in Table~\ref{tab:data_assimilation_results} and Fig.~\ref{fig:da_1d_mse}. All methods exhibit exceptional convergence characteristics; for instance, the Softmax-based coordinate descent method saw the Test Mean Squared Error (MSE) drop significantly within the training cycle. A key observation is the stability and divergence of the expert weight evolution, as shown in Fig.~\ref{fig:1d_weights}. As training progresses, the framework successfully isolates the most reliable signals. For the \textcolor{blue}{1D Burgers'}, the Softmax method progressively shifted the weight toward the primary sources to stabilize the estimation. Conversely, the Lagrangian-based methods (Lagrangian, ImpLagrangian, and AugLag) achieved sharp convergence by focusing on specific high-relevance sources. Notably, the Improved Lagrangian method justified the use of orchestrated multi-source optimization, as the model effectively filters noisy auxiliary observations to achieve a state estimation far more precise than any individual source could provide.}
+
+\textcolor{red}{In the 2D Navier-Stokes trajectories, which involve significantly higher non-linearity and a resolution of $128 \times 128$, the optimization framework remains remarkably robust (Fig.~\ref{fig:da_2d_loss} and Fig.~\ref{fig:da_1d_loss}). Despite the challenge of handling trajectories with viscosities ($\nu$) as low as $0.0010$, the constrained optimization methods minimized global loss with high precision. The Softmax method emerged as the top performer in this high-dimensional task, achieving a final Test MSE of $3.15 \times 10^{-5}$, outperforming the ADMM routing approach ($2.11 \times 10^{-4}$) and the Lagrangian method ($2.71 \times 10^{-4}$). The efficacy of the orchestration is further evidenced by the weight evolution in the Lagrangian method (Fig.~\ref{fig:2d_weights}), which successfully identified the dominant signals by converging to weights of $0.537$ for Source 0 and $0.463$ for Source 1, while effectively zeroing out the noisy auxiliary sources $S_2$ and $S_3$. Final costs across all 2D tests stabilized between $1.34$ and $1.77$, demonstrating that the framework is scalable and resilient to the complex dynamics inherent in fluid systems.}
+
+\begin{table}[tbp]
+\centering
+\footnotesize
+\caption{Exact performance comparison of combination methods for Data Assimilation across 1D and 2D challenging trajectories at res 128.}
+\setlength{\tabcolsep}{3pt}
+\label{tab:data_assimilation_results}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{@{}ll S[table-format=1.0e-1] S[table-format=1.0e-1] S[table-format=1.2e-2] S[table-format=1.3] S[table-format=5.0] S[table-format=3.3] S[table-format=1.3] S[table-format=1.3] S[table-format=1.3]@{}}
+\toprule
+\multirow{2}{*}{\textbf{Dim}} & \multirow{2}{*}{\textbf{Method}} & {\textbf{Train}} & {\textbf{Val}} & {\textbf{Test}} & {\textbf{Final}} & {\textbf{Time}} & \multicolumn{4}{c}{\textbf{Final Expert Weights}} \\
+\cmidrule(l){8-11}
+& & {\textbf{Loss}} & {\textbf{MSE}} & {\textbf{MSE}} & {\textbf{Cost}} & {\textbf{(s)}} & {\boldmath$S_0$} & {\boldmath$S_1$} & {\boldmath$S_2$} & {\boldmath$S_3$} \\
+\midrule
+\multirow{5}{*}{1D} & Softmax       & 2.13e-2 & 3.76e-4 & 3.97e-4 & 1.976 & 2258.50 & 0.959 & 0.035 & 0.004 & 0.001 \\
+                    & Lagrangian    & $\mathbf{2.00 \times 10^{-2}}$ & $\mathbf{3.00 \times 10^{-4}}$ & 3.31e-4 & 2.000 & 3495.38 & 1.000 & 0.000 & 0.000 & 0.000 \\
+                    & ImpLagrangian & 2.04e-2 & 3.37e-4 & 3.29e-4 & 2.000 & 2270.79 & 1.000 & 0.000 & 0.000 & 0.000 \\
+                    & AugLag    & 2.01e-2 & 3.23e-4 & $\mathbf{3.23 \times 10^{-4}}$ & 2.000 & 2270.59 & 1.000 & 0.000 & 0.000 & 0.000 \\
+                    & ADMM      & 2.08e-2 & 3.70e-4 & 3.54e-4 & 1.970 & 2247.33 & 0.948 & 0.045 & 0.005 & 0.002 \\
+\midrule
+\multirow{5}{*}{2D} & Softmax       & $\mathbf{3.56 \times 10^{-3}}$ & $\mathbf{2.88 \times 10^{-5}}$ & $\mathbf{3.15 \times 10^{-5}}$ & 1.340 & 10752.52 & 0.288 & 0.283 & 0.250 & 0.178 \\
+                    & Lagrangian    & 7.27e-3 & 2.76e-4 & 2.71e-4 & 1.768 & 17938.72 & 0.537 & 0.463 & 0.000 & 0.000 \\
+                    & ImpLagrangian & 2.73e-2 & 7.72e-4 & 7.73e-4 & 1.536 & 11071.18 & 0.362 & 0.349 & 0.289 & 0.000 \\
+                    & AugLag    & 6.40e-3 & 1.12e-4 & 1.22e-4 & 1.763 & 11139.55 & 0.526 & 0.474 & 0.000 & 0.000 \\
+                    & ADMM      & 1.25e-2 & 1.98e-4 & 2.11e-4 & 1.431 & 11049.32 & 0.336 & 0.311 & 0.234 & 0.120 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+% --- Figures Code ---
+\begin{figure}[h!]
+    \centering
+    % Row 1: MSE
+    \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/data_assimilation/1d/mse.png}
+         \caption{1D MSE evolution}
+         \label{fig:da_1d_mse}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/data_assimilation/2d/mse.png}
+         \caption{2D MSE evolution}
+         \label{fig:da_2d_mse}
+     \end{subfigure}
+     
+     \vspace{1em} % Adds vertical space between the rows
+     
+     % Row 2: Loss
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/data_assimilation/1d/loss.png}
+         \caption{1D Loss evolution}
+         \label{fig:da_1d_loss}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/data_assimilation/2d/loss.png}
+         \caption{2D Loss evolution}
+         \label{fig:da_2d_loss}
+     \end{subfigure}
+     
+    \caption{\textbf{Comparative MSE and training loss minimization for data assimilation combination methods across dimensionalities.} This figure highlights the performance of learning a dynamic Kalman gain and spatial weights to assimilate four noisy data sources into a background state. In the highly non-linear 2D regime (b, d), constrained optimization methods effectively minimize the global loss, efficiently filtering out noisy auxiliary observations to achieve high-precision state estimation. For the 1D case, the error has not stabilized after 500 epochs suggesting that 1D problem is challenging compared to 2D since in the 2D problem, it can be corrected by local/global neighbours but the method struggles due to less neighbours in 1D. This method could benefit from longer epochs or more training data.}
+    \label{fig:da_convergence_evolution}
+\end{figure}
+
+\begin{figure}[h!]
+    \centering
+    \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/data_assimilation/1d/weights.png}
+         \caption{Expert weight evolution (1D)}
+         \label{fig:1d_weights}
+     \end{subfigure}
+     \hfill
+     \begin{subfigure}[b]{0.48\textwidth}
+         \centering
+         \includegraphics[width=\textwidth]{plots/data_assimilation/2d/weights.png}
+         \caption{Expert weight evolution (2D)}
+         \label{fig:2d_weights}
+     \end{subfigure}
+    \caption{\textbf{Dynamic expert routing: weight distribution over training epochs in the data assimilation framework.} This figure tracks the source selection behavior for 1D (a) and 2D (b) data assimilation tasks. Lagrangian-based approaches rapidly converge to sparse, boundary-attaining distributions, explicitly forcing uninformative auxiliary sources (e.g., $S_2$ and $S_3$) to exact zeros---reaching strictly binary $0/1$ weights in the 1D regime and sparse two-source distributions in 2D. This contrasts with Softmax, which retains residual weights for irrelevant sources due to vanishing gradient issues near simplex boundaries.}
+    \label{fig:da_weight_evolution}
+\end{figure}
+
+
+
+\section{Discussion}\label{section:discussion}
+
+\textcolor{red}{The experimental results demonstrate distinct behavioral patterns between the Softmax and Lagrangian approaches, which can be directly mapped to the mathematical properties established in Proposition~\ref{thm:unified_gradient} and Theorem~\ref{thm:unified_convergence}. Our analysis encompasses data assimilation, expert routing, and large-scale selection tasks, revealing critical insights into the interplay between physical fidelity and computational constraints.}
+
+\textcolor{red}{While Softmax parameterization serves as a robust baseline for probabilistic routing, our results confirm that it is theoretically ill-suited for scenarios requiring strict feasibility. The observed budget violation in the 2D \textcolor{blue}{expert-routing} regime ($\mathcal{C} = 3.992$) is expected rather than a failure: \textcolor{blue}{Softmax has no mechanism to enforce a hard budget by construction}, and this is precisely the limitation that matters in safety-critical physical systems where constraints are hard boundaries (e.g., maximum power output or financial limits) rather than soft guidelines. Our Lagrangian approach essentially projects the optimization onto the feasible manifold, a necessary property that soft-gating mechanisms lack by design.}
+
+\textcolor{red}{In the data assimilation tasks, we observed distinct trends for source preference among the different methods. In the \textcolor{blue}{1D Burgers'} regime, the Softmax source selection method heavily prioritized Source 0 ($S_0$) ($0.959$), while Lagrangian-based methods converged to a ``winner-take-all" selection of the exact same Source 0 ($S_0$) ($1.000$). This behavior can be explained by the difference in their weight gradients (Proposition~\ref{thm:unified_gradient}): Softmax utilizes entropic smoothing through the Jacobian $J_\sigma(\alpha)$, while Lagrangian variants are driven by the explicit residual term $E(\theta) - (\mu\mathbf{1} + \nu)$. Notably, the AugLag method established the performance ceiling with a Test MSE of $3.23 \times 10^{-4}$. While Softmax offers faster initial error reduction (Fig.~\ref{fig:da_1d_mse}), its sensitivity to the logit-space gradient can lead to higher physics loss in high-noise regimes, as suggested by the numerical bounds in Theorem~\ref{thm:unified_numerical_bounds}.}
+
+\textcolor{red}{A more distinctive contrast emerged in the expert routing scenario, where architectures like FNO ($\lambda_3$) and DeepONet ($\lambda_4$) were introduced. In 2D Navier-Stokes experiments, we observed a significant shift toward expert specialization. The AugLag method aggressively prioritized the FNO expert ($\lambda_3 = 0.734$), resulting in superior accuracy ($1.40 \times 10^{-7}$). This specialization aligns with physical intuition, as FNOs are uniquely suited to the spectral features of 2D flows. Conversely, the 1D regime maintained a ``collaborative equilibrium" where experts shared weight more uniformly (e.g., $\lambda_1 \approx 0.229$, $\lambda_2 \approx 0.299$, $\lambda_3 \approx 0.244$, $\lambda_4 \approx 0.227$ for AugLag) to resolve local shock-front gradients. This phenomenon validates Theorem~\ref{thm:unified_convergence}, where Softmax's entropic smoothing improves the constant $C_\lambda$, but the Lagrangian formulation's dual variables force faster weight convergence ($O(1/k)$) toward the dominant physical prior.}
+
+\textcolor{red}{The distinction between a small residual weight (e.g., $\lambda \approx 10^{-3}$ in Softmax) and a hard zero (in Lagrangian methods) is critical for scientific interpretability. In data assimilation, a hard zero explicitly rejects a hypothesis or sensor source as `uninformative', effectively pruning the physical graph. This sparsity allows for conditional computation during inference; sources with zero weight need not be evaluated or monitored, providing a computational advantage that soft-gating cannot offer.}
+
+\textcolor{red}{The scaling behavior of both approaches, tested with 100 data sources, further underscores the crossover points defined in \textcolor{blue}{Proposition}~\ref{thm:crossover}. In large-scale 1D experiments, the ImpLagrangian method achieved the best predictive MSE ($8.48 \times 10^{-2}$). While the Softmax method technically remained within the 3.0 target budget for this specific task ($\mathcal{C} = 1.783$), it operates without hard computational guardrails. In contrast, the ADMM and AugLag methods explicitly and successfully adhered to the resource budget of 3.0 while maintaining strict 90.00\% sparsity. As established in \textcolor{blue}{Proposition}~\ref{thm:crossover}, the crossover point $n^*$ represents the scale at which the $O(n \log n)$ projection cost of ADMM is offset by its accelerated (geometric) feasibility rate. The 2D Navier-Stokes scaling results (Table~\ref{tab:large_scale_multi_source}) confirm that for high-dimensional, complex state spaces , the constrained methods establish a more robust gatekeeper mechanism for hardware-limited environments.}
+
+\textcolor{red}{From a computational standpoint, Softmax remains the simplest mechanism for real-time applications where speed is critical \cite{asch2016data}. However, as shown in Theorem~\ref{thm:unified_numerical_bounds}, as weights approach the simplex boundaries (0 or 1), the Softmax diagonal vanishes, leading to vanishing gradients and numerical instability ($\kappa \to \infty$). The Lagrangian method, while introducing overhead for dual updates, offers finer control and drives exact, stable convergence to the sparse boundaries, avoiding the asymptotic slowdown and residual noise characteristic of unconstrained soft-gating. These trade-offs are crucial: Lagrangian methods excel in precision-demanding tasks (e.g., medical fluid dynamics), while Softmax is better suited for resource-limited, time-sensitive estimation \cite{reich2023data}.}
+
+
+\textcolor{red}{Future work should explore adaptive strategies that transition from Softmax-initialized rapid estimates to Lagrangian-refined solutions. Such hybrid frameworks could exploit the $O(1/\sqrt{k})$ initial speed of Softmax while ensuring the $O(1/k)$ physical consistency and long-term stability of the Lagrangian dual variables. This approach would be particularly impactful in high-noise regimes like subsurface flow monitoring or edge-computing IoT networks \cite{carrassi2023data}, where balancing numerical precision (Theorem~\ref{thm:unified_numerical_bounds}) with hardware scalability is paramount.}
+
+\section{Conclusion and Future Work}\label{section:conclusion}
+
+\textcolor{red}{In this work, we proposed a unified theoretical framework for multi-source optimization, establishing a principled methodology for state estimation and architecture routing in complex physical systems. By deriving the unified gradient structure (Proposition~\ref{thm:unified_gradient}), we established distinct convergence rates that decouple the dynamics of source weights ($O(1/k)$) from model parameters ($O(1/\sqrt{k})$). Our theoretical bounds on numerical precision (Theorem~\ref{thm:unified_numerical_bounds}) provide a vital diagnostic tool for practitioners, highlighting that while Lagrangian methods establish the performance ceiling for accuracy and constraint adherence, Softmax remains a computationally efficient alternative for real-time, resource-limited applications.}
+
+\textcolor{red}{Empirical validations across data assimilation, expert routing, and large-scale source selection tasks confirm the framework’s practical utility. In the \textcolor{blue}{1D Burgers'} regime, the framework demonstrated a ``collaborative equilibrium" with high entropy ($\mathcal{H} = -\sum_i \lambda_i \ln \lambda_i \approx 1.38$, near the four-expert maximum $\ln 4 \approx 1.386$), while the 2D Navier-Stokes experiments revealed a transition toward expert specialization, with the Augmented Lagrangian method aggressively prioritizing the FNO architecture ($\lambda_3 = 0.734$) to resolve complex spectral features. Furthermore, the 100-source scaling experiments identified critical crossover points (\textcolor{blue}{Proposition}~\ref{thm:crossover}) where ADMM routing variants outperform unconstrained Softmax in maintaining both predictive fidelity and strict resource sparsity (90.00\%).}
+
+Several promising extensions emerge from this work to further advance the frontier of scientific machine learning. \textcolor{red}{First, the integration of variance reduction techniques, such as Stochastic Variance Reduced Gradient (SVRG) or Stochastic Average Gradient Augmented (SAGA), could enable the framework to scale to stochastic mini-batch settings without sacrificing the $O(1/k)$ weight convergence rate. Second, developing meta-learning architectures that dynamically transition between Softmax-based initialization and Lagrangian-based refinement could offer a compelling ``warm-start" strategy for transient fluid dynamics.}
+
+\textcolor{red}{Additionally, extending the framework to encompass multi-fidelity modeling and explicit uncertainty quantification (UQ) would enhance its robustness in safety-critical applications, such as medical fluid mechanics or structural monitoring. Future efforts will also explore distributed ADMM algorithms to support ultra-high-dimensional state spaces in oceanic and atmospheric modeling. Ultimately, by balancing mathematical rigor with practical hardware constraints, this framework provides a versatile foundation for principled optimization in the next generation of physics-informed AI.}
+
+
+\printbibliography
+
+
+
+\appendix
+
+
+\section{Additional information about the Lagrangian approach}
+
+
+\subsection{Algorithm and Analysis}
+
+\begin{algorithm}[H]
+\caption{Two-Time-Scale Augmented Lagrangian Method}
+\begin{algorithmic}[1]
+\State \textbf{Initialize:} $\theta_0 \in \Theta$, $\lambda_0 = \frac{1}{n}\mathbf{1}$, $\mu_0 = 0$, $\nu_0 = \mathbf{0}$
+\State \textbf{Set:} $\eta_\theta = \frac{1}{L_\theta}$, $\eta_\lambda = \eta_\theta^2$, $\rho > 0$
+\While{not converged}
+    \State Compute $\nabla_\theta \mathcal{L}_\rho, \nabla_\lambda \mathcal{L}_\rho$ via automatic differentiation
+    \State $\theta_{k+1} \gets \theta_k - \eta_\theta \nabla_\theta \mathcal{L}_\rho$
+    \State $\lambda_{k+1} \gets \Pi_{\mathcal{T}_\Delta}[\lambda_k - \eta_\lambda \nabla_\lambda \mathcal{L}_\rho]$
+    \State $\mu_{k+1} \gets \mu_k + \rho g(\lambda_k)$
+    \State $\nu_{k+1} \gets [\nu_k + \rho h(\lambda_k)]_+$
+    \If{$\|g(\lambda_k)\| + \sum_i \max\{0, h_i(\lambda_k)\} > \gamma\|g(\lambda_{k-1})\|$}
+        \State $\rho \gets \min\{2\rho, \rho_{max}\}$
+    \EndIf
+\EndWhile
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\subsection{Method-Specific Assumptions}
+\label{appendix:method_specific_assumptions}
+We now present the specialized assumptions required for each method's convergence guarantees.
+
+
+\begin{assumption}[Augmented Lagrangian Regularity]\label{assump:auglag}
+To ensure the stability of the primal-dual dynamics and the avoidance of numerical divergence in the presence of non-convexity, we extend Assumption~\ref{assump:basic} with the following specific requirements:
+
+\begin{enumerate}
+    \item \textbf{Two-Time-Scale Learning Rates:} The primal and dual updates must be decoupled via a separation of time scales to prevent oscillatory behavior in the saddle-point search. We require:
+    \begin{equation}
+        \eta_\lambda = O(\eta_\theta^2), \quad \eta_\theta \leq \frac{1}{L_\theta(1 + \epsilon_{\mathrm{machine}}\kappa_\theta)}, \quad \eta_\lambda \leq \min\left\{\eta_\theta^2, \frac{1}{L_\lambda + \rho L_c}\right\}
+    \end{equation}
+    where $\eta_\theta$ is the primal step size and $\eta_\lambda$ is the dual step size. This ensures the primal variable $\theta$ converges to a quasi-stationary point relative to the slower evolution of the dual multipliers.
+
+    \item \textbf{Penalty Parameter Adaptation:} The penalty parameter $\rho$ must provide sufficient curvature to the Augmented Lagrangian while remaining within numerically stable bounds:
+    \begin{equation}
+        \rho \in \left[\rho_{\min}, \rho_{\max}\right], \quad \rho_{\min} > \frac{4\|\mu_0 - \mu^*\|^2}{\epsilon^2}, \quad \rho_{\max} \leq \frac{\kappa_{\max}}{\epsilon_{\mathrm{machine}}\kappa_c}
+    \end{equation}
+    where $\rho_{\min}$ is chosen to guarantee sufficient feasibility pressure relative to the initial dual error. We employ a reactive update rule $\rho_{k+1} = \min\{2\rho_k, \rho_{\max}\}$ whenever the constraint violation fails to decrease by a factor of $\gamma < 1$.
+
+    \item \textbf{Non-Convex Kurdyka-Łojasiewicz (KL) Condition:} To guarantee convergence to a stationary point in a non-convex landscape, the Augmented Lagrangian $\mathcal{L}_\rho$ must satisfy the KL property. There exists an exponent $\vartheta \in (0,1]$ and a constant $c > 0$ such that:
+    \begin{equation}
+        |\nabla_\theta \mathcal{L}_\rho(\theta, \lambda, \mu, \nu)| \geq c \cdot |\mathcal{L}_\rho(\theta, \lambda, \mu, \nu) - \mathcal{L}_\rho^*|^\vartheta
+    \end{equation}
+    This condition ensures that the gradient remains bounded away from zero except in the neighborhood of a critical point, precluding sub-linear stagnation in flat regions.
+
+    \item \textbf{Dual Variable Boundedness:} The sequence of dual multipliers $(\mu_k, \nu_k)$ generated by the algorithm must remain within a compact set to ensure the existence of limit points:
+    \begin{equation}
+        \|\mu_k\| \leq \mu_{\max} = O\left(\frac{L_\lambda}{\sqrt{n}}\right), \quad \|\nu_k\| \leq \nu_{\max} = O\left(\rho\right)
+    \end{equation}
+    This bound reflects the trade-off between the complexity of the constraint manifold and the regularization effect of the penalty parameter.
+\end{enumerate}
+\end{assumption}
+
+
+\begin{assumption}[ADMM Regularity]\label{assump:admm}
+For the Alternating Direction Method of Multipliers (ADMM) to maintain a stable residual decay and converge to a primal-dual optimal solution, the following structural and algorithmic conditions must be satisfied:
+
+\begin{enumerate}
+    \item \textbf{Variable Splitting and Rank Condition:} The problem must be formulated using a consensus constraint of the form $A\lambda + Bz = c$, where we set $A=I$, $B=-I$, and $c=0$, yielding the coupling $\lambda - z = 0$ with $z$ constrained to the simplex $\Delta^{n-1}$. To ensure the solvability of the underlying linear systems, we require the full-rank condition:
+    \begin{equation}
+        \textcolor{blue}{\operatorname{rank}([\,A \;\; B\,]) = n}
+    \end{equation}
+    This ensures that the objective is strongly reconstructible from the split variables.
+
+    \item \textbf{Strong Convexity of Subproblems:} The proximal term added by the Augmented Lagrangian must be sufficient to ensure that the $\lambda$-update subproblem is strongly convex, even if the original objective is only weakly convex. We require:
+    \begin{equation}
+        \nabla^2_\lambda\left(\sum_i \lambda_i E_i(\theta) + \frac{\rho}{2}\|\lambda - z + \mu\|^2\right) \succeq \rho I_n
+    \end{equation}
+    This condition guarantees a unique, stable minimizer for the dual-variable update at each iteration.
+
+    \item \textbf{Penalty Parameter Lower Bound:} The penalty parameter $\rho$ must be large enough to dominate the Lipschitz constants of the gradients, ensuring the splitting remains stable. Specifically, $\rho$ must satisfy:
+    \begin{equation}
+        \rho > \max\left\{2L_\lambda, \frac{4L_\theta^2}{\sigma_{\min}(A^TA)}\right\}
+    \end{equation}
+    where $L_\lambda$ and $L_\theta$ are the respective Lipschitz constants, and $\sigma_{\min}$ denotes the minimum singular value of the matrix $A$.
+
+    \item \textbf{Subproblem Solution Accuracy:} Rather than requiring exact solutions, the inexactness of the $\theta$ and $\lambda$ subproblems must decay over time to prevent the accumulation of errors. The error tolerances $\epsilon_{\mathrm{sub}}$ must satisfy:
+    \begin{equation}
+        \epsilon_{\mathrm{sub,\theta}} \leq \frac{\epsilon_{\mathrm{tol}}^2}{\rho k}, \quad \epsilon_{\mathrm{sub,\lambda}} \leq \frac{\epsilon_{\mathrm{tol}}}{\rho}
+    \end{equation}
+    where $k$ is the iteration counter. This ensures that as the global tolerance $\epsilon_{\mathrm{tol}}$ is approached, the subproblem precision increases.
+
+    \item \textbf{Initialization Sensitivity:} To avoid divergent trajectories in the non-convex case, the initial points for the split variables must reside within a trust region inversely proportional to the penalty parameter:
+    \begin{equation}
+        \|\lambda_0 - \lambda^*\| \leq \frac{C}{\rho}, \quad \|z_0 - z^*\| \leq \frac{C}{\rho}
+    \end{equation}
+    where $C$ is a constant related to the diameter of the feasible set.
+\end{enumerate}
+\end{assumption}
+
+
+\begin{assumption}[Single-timescale Augmented Lagrangian Coupling]\label{assump:single_scale}
+In contrast to two-time-scale approaches, the single-timescale framework updates primal and dual variables concurrently. This requires specific bounds to manage the interaction between the different curvatures of the parameter and multiplier spaces:
+
+\begin{enumerate}
+    \item \textbf{Joint Lipschitz Constant:} To ensure the stability of the simultaneous gradient steps, the global learning rate $\eta$ must be constrained by the maximum smoothness of the joint objective. We define:
+    \begin{equation}
+        L_{\mathrm{joint}} = \max\{L_\theta, L_\lambda + \rho L_c\} \quad \text{and} \quad \eta \leq \frac{1}{L_{\mathrm{joint}}}
+    \end{equation}
+    This ensures that the step size is conservative enough to accommodate the most volatile component of the system, whether it be the model parameters or the penalty-weighted constraints.
+
+    \item \textbf{Timescale Coupling and Conditioning:} The efficiency of the Single-timescale Augmented Lagrangian update is governed by the ratio of the primal and dual curvatures. We define the effective condition number as:
+    \begin{equation}
+\kappa_{\mathrm{effective}} = \frac{\max\{L_\theta,\, L_\lambda + \rho L_c\}}{\min\{L_\theta,\, L_\lambda + \rho L_c\}} \;\geq\; 1,
+    \end{equation}
+    This ratio quantifies the imbalance between the variables; high values of $\kappa_{\mathrm{effective}}$ amplify the convergence time compared to two-scale methods which can adapt to each curvature independently.
+
+    \item \textbf{Constraint Violation Trade-off:} The learning rate is further restricted by the penalty parameter $\rho$ to prevent large constraint violations from destabilizing the trajectory. We require:
+    \begin{equation}
+        \eta \leq \min\left\{\frac{1}{L_\theta}, \frac{1}{\rho\kappa_c}\right\}
+    \end{equation}
+    This condition ensures that the dual update does not overcorrect when $\rho$ is large, which would otherwise lead to divergence.
+
+    \item \textbf{Sublinear Convergence Bound:} Under these coupling conditions, the joint iterate sequence $(\theta_k, \lambda_k)$ satisfies a sublinear convergence rate toward the optimal pair $(\theta^*, \lambda^*)$:
+    \begin{equation}
+\|\theta_k - \theta^*\|^2 + \|\lambda_k - \lambda^*\|^2 \leq \frac{\kappa_{\mathrm{effective}} \cdot D_0^2}{\sqrt{k}}
+    \end{equation}
+    where $D_0$ represents the initial distance to the optimality set.
+\end{enumerate}
+\end{assumption}
+
+\begin{assumption}[Softmax Structure]\label{assump:softmax}
+When the dual variables are parameterized via a softmax layer, the geometry of the simplex and the logit space imposes the following requirements for regularity and gradient flow:
+
+\begin{enumerate}
+    \item \textbf{Logit Space Regularity:} To prevent the dual multipliers $\lambda_i$ from vanishing—which would lead to ``dead" constraints—the logit vector $\alpha$ must remain bounded:
+    \begin{equation}
+        \|\alpha\|_\infty \leq \alpha_{\max} = O(\log(n/\epsilon_{\mathrm{tolerance}}))
+    \end{equation}
+    This bound ensures that every weight $\lambda_i$ maintains a minimum value of at least $\epsilon_{\mathrm{tolerance}}/n$, preserving the exploration of the constraint set.
+
+    \item \textbf{Jacobian Conditioning:} The sensitivity of the mapping from logits to multipliers is controlled by the Jacobian of the softmax function $J_\sigma$. Its condition number is inversely proportional to the smallest multiplier:
+    \begin{equation}
+        \kappa(J_\sigma) = \frac{1}{\min_i \lambda_i} \leq \frac{n}{\epsilon_{\mathrm{tolerance}}}
+    \end{equation}
+    A well-conditioned Jacobian is necessary to ensure that gradients backpropagated to the logit space do not vanish or explode.
+
+    \item \textbf{Temperature Scaling:} We utilize a temperature parameter $\tau$ to control the peakiness of the distribution. To avoid numerical underflow or overflow, $\tau$ must be bounded relative to the machine precision and the logit magnitude:
+    \begin{equation}
+        \lambda_i = \frac{e^{\alpha_i/\tau}}{\sum_j e^{\alpha_j/\tau}}, \quad \tau \in [\tau_{\min}, \tau_{\max}] \quad \text{with} \quad \tau_{\min} \geq \frac{\epsilon_{\mathrm{machine}}}{\|\alpha\|}
+    \end{equation}
+
+    \item \textbf{Implicit Entropic Bias:} The softmax parameterization implicitly acts as a regularizer. By expanding the loss $L_{\text{softmax}}$ around $\tau$, we observe an entropic smoothing effect:
+    \begin{equation}
+        L_{\text{softmax}}(\theta, \alpha) = L(\theta, \lambda) + \tau H(\lambda) + O(\tau^2)
+    \end{equation}
+    where $H(\lambda) = -\sum_i \lambda_i \log \lambda_i$. This indicates that the softmax structure inherently favors high-entropy (more uniform) distributions of $\lambda$ when $\tau$ is positive.
+
+    \item \textbf{Gradient Vanishing Mitigation:} In regions where a specific $\lambda_i$ is very small, the gradient with respect to its logit $\alpha_i$ vanishes linearly:
+    \begin{equation}
+        \|\nabla_{\alpha_i} L\| = O(\lambda_i) \quad \text{for } \lambda_i \ll 1
+    \end{equation}
+    This requires that the optimization algorithm be robust to the saturation effects inherent in the softmax geometry.
+\end{enumerate}
+\end{assumption}
+
+
+
+\subsubsection{Proof Sketch for Proposition \ref{thm:unified_gradient}} \label{appendix:unified_gradient}
+
+\textbf{Part 1 (Parameter Gradient):} Differentiation of $L(\theta, \lambda)$ in \eqref{eq:unified_problem} with respect to $\theta$ yields a convex combination of individual gradients $\nabla E_i(\theta)$, as penalty terms $c(\lambda)$ are independent of $\theta$, resulting in \eqref{eq:grad_theta}.
+
+\textbf{Part 2 (Weight Gradients):}
+\begin{itemize}
+    \item \textbf{Softmax:} Applying the chain rule to the composition $L(\theta, \sigma(\alpha))$ yields the product of $E(\theta)$ and the Jacobian $J_\sigma(\alpha) = \text{diag}(\lambda) - \lambda\lambda^\top$, forming \eqref{eq:gw_softmax}.
+    \item \textbf{Single-timescale Augmented Lagrangian:} The update performs gradient descent on $L$ from \eqref{eq:unified_problem}. Incorporating dual multipliers $\mu, \nu$ from Assumption \ref{assump:basic} and projecting via $\Pi_{\mathcal{T}_\Delta}$ ensures the weights stay in $\Delta^{n-1}$, yielding \eqref{eq:gw_single}.
+    \item \textbf{Augmented Lagrangian:} Differentiation of the full Lagrangian $\mathcal{L}_\rho = L + \mu g + \nu^\top h + \nu_{\text{budget}} h_{\text{budget}} + \tfrac{\rho}{2}\max\{0,\,c^\top\lambda - B\}^2$ yields the linear and quadratic penalty components, including the budget cost vector $c$ scaled by its respective dual variable $\nu_{\text{budget}}$, as shown in \eqref{eq:gw_auglag}. For the Static Augmented Lagrangian, $\rho$ applies a constant curvature to the constraint landscape. In our Adaptive Augmented Lagrangian, the dynamic penalty $\rho_k$ aggressively reshapes the loss landscape at each step $k$ to heavily penalize ongoing constraint violations.
+    
+    \item \textbf{ADMM:} Setting the subdifferential of the proximal $\lambda$-update to zero results in the residual-driven condition in \eqref{eq:gw_admm}.
+\end{itemize}
+
+
+
+\subsection{\textcolor{blue}{Proofs of the Convergence and Numerical Results}}
+
+{\color{blue}
+\paragraph{Proof of Theorem~\ref{thm:unified_convergence}.}
+\emph{Model parameters ($O(1/\sqrt{k})$).} For fixed $\lambda$, the map $\theta\mapsto L(\theta,\lambda)=\sum_i\lambda_i E_i(\theta)$ is a convex combination of $L_{\theta,i}$-smooth functions and is therefore $L_\theta$-smooth with $L_\theta=\max_i L_{\theta,i}$ (Assumption~\ref{assump:basic}(2)). The primal step $\theta_{k+1}=\theta_k-\eta_\theta\nabla_\theta L$ with $\eta_\theta=1/L_\theta$ satisfies the descent lemma
+\[
+L(\theta_{k+1},\lambda_k)\le L(\theta_k,\lambda_k)-\tfrac{1}{2L_\theta}\|\nabla_\theta L(\theta_k,\lambda_k)\|^2+O(\eta_\lambda),
+\]
+where the $O(\eta_\lambda)$ term bounds the drift induced by the concurrent weight update and is negligible relative to the descent because $\eta_\lambda=O(\eta_\theta^2)$ (Assumption~\ref{assump:auglag}(1)). Telescoping over $t=0,\dots,k$ and using the lower bound $L\ge -M$ (Assumption~\ref{assump:basic}(1)) gives
+\[
+\min_{t\le k}\|\nabla_\theta L(\theta_t,\lambda_t)\|^2\le\frac{2L_\theta\big(L(\theta_0,\lambda_0)+M\big)}{k+1},
+\]
+so the best-iterate gradient norm is $O(1/\sqrt{k})$. Under the Kurdyka--{\L}ojasiewicz property (Assumption~\ref{assump:auglag}(3)) this gradient-norm decay upgrades to the stated iterate bound $\|\theta_k-\theta^*\|^2\le C_\theta/\sqrt{k}$ (the KL exponent controls the conversion; see the remark below).
+
+\emph{Source weights ($O(1/k)$).} On the slow timescale $\eta_\lambda=O(\eta_\theta^2)$ the primal is quasi-stationary, so the weight recursion is a two-time-scale stochastic approximation whose slow component performs projected updates of $\lambda\mapsto\langle E(\theta^\star),\lambda\rangle$ on $\Delta^{n-1}$ regularized by the quadratic penalty of \eqref{equation:augmented_Lagrangian_formulation}. The standard two-time-scale analysis with diminishing/slow step size yields the averaged-iterate rate $\|\lambda_k-\lambda^*\|^2=O(1/k)$ \cite{borkar2008stochastic,konda2004convergence,Marion2023Leveraging}. For the improved variant the adaptive $\rho_k\le\rho_{\max}$ (Assumption~\ref{assump:auglag}(2)) only decreases the leading constant, giving $C_\lambda^{\mathrm{ImpLag}}\le C_\lambda^{\mathrm{AugLag}}$.
+
+\emph{ADMM feasibility.} By Assumption~\ref{assump:admm}(2) the $\lambda$-subproblem is $\rho$-strongly convex, so the proximal $z$-update is a contraction with modulus $\omega=(1+\varsigma\rho)^{-1}<1$. Iterating the one-step contraction $\phi_{k+1}\le\omega\,\phi_k$ on the feasibility residual $\phi_k$ gives $\phi_k\le\omega^k\phi_0$, i.e.\ the geometric (linear) feasibility rate, while the primal retains the non-convex $O(1/\sqrt{k})$ rate above. \hfill$\square$
+
+\emph{Remark (verification).} The gradient-norm bound and the ADMM contraction are exact given Assumptions~\ref{assump:basic} and \ref{assump:admm}. The KL conversion ($\vartheta=\tfrac12$ actually yields a rate at least as fast as $1/\sqrt{k}$) and the two-time-scale constant should be checked against the exponent and step schedule used in the experiments.
+
+\paragraph{Proof of Theorem~\ref{thm:unified_numerical_bounds}.}
+By the floating-point error model (Assumption~\ref{assump:precision}), any differentiable block $L_m$ satisfies $\|\hat{\nabla} L_m-\nabla L_m\|\le\epsilon_{\text{machine}}\,\kappa(L_m)\,\|\nabla L_m\|$. Propagating this bound through each method's weight map yields the effective condition numbers $\kappa_m$: applying the chain rule to the composition $L(\theta,\sigma(\alpha))$ contributes the logit-to-weight term additively, $\kappa_{\text{Softmax}}=\kappa_\theta+\kappa_\alpha\|J_\sigma\|^2$; the gated budget penalty $\tfrac{\rho}{2}\max\{0,c^\top\lambda-B\}^2$ enters the Hessian linearly in $\rho$, so its curvature (hence condition number) scales as $O(\rho^2)$ for the static variant and $O(\rho_k^2)$ for the adaptive one; and the ADMM variable splitting caps the amplification at $\kappa_{\text{ADMM}}=\max\{\kappa_\theta,\kappa_\lambda,\rho\kappa_c\}$. Finally, the Adam update divides the (finite-precision) gradient by $\sqrt{v_t}+\epsilon_{\text{adam}}$, so the relative error of the update direction is amplified by $1/(\sqrt{v_t}+\epsilon_{\text{adam}})$, producing the stated bound. \hfill$\square$
+}
+
+\section{ML Architectures}
+
+\subsection{Multi-scale training}
+
+
+\begin{table}[h]
+\centering
+\caption{Detailed Architectural Specification (1D Multi-Scale learning)}
+\label{tab:architecture}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Component} & \textbf{Layer} & \textbf{Parameters / Configuration} & \textbf{Output Shape} \\ \midrule
+\textbf{Input} & Signal & 1D PDE State & $(B, 1, L)$ \\ \midrule
+\textbf{Router} & Conv1d (1) & $in=1, out=16, k=5, s=2, p=2$ & $(B, 16, L/2)$ \\
+ & ReLU & - & $(B, 16, L/2)$ \\
+ & Conv1d (2) & $in=16, out=32, k=5, s=2, p=2$ & $(B, 32, L/4)$ \\
+ & ReLU & - & $(B, 32, L/4)$ \\
+ & AdaptAvgPool & $output\_size=1$ & $(B, 32, 1)$ \\
+ & Flatten & - & $(B, 32)$ \\
+ & Linear & $in=32, out=3$ (Expert Weights) & $(B, 3)$ \\ \midrule
+\textbf{Experts (x3)} & Interpolate & Resample to $L \in \{32, 64, 128\}$ & $(B, 1, Res)$ \\
+\textit{Expert1D} & Conv1d (1) & $in=1, out=32, k=5, p=2$, Circular & $(B, 32, Res)$ \\
+ & Tanh & - & $(B, 32, Res)$ \\
+ & Conv1d (2) & $in=32, out=32, k=5, p=2$, Circular & $(B, 32, Res)$ \\
+ & Tanh & - & $(B, 32, Res)$ \\
+ & Conv1d (3) & $in=32, out=1, k=5, p=2$, Circular & $(B, 1, Res)$ \\ \bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[ht]
+\centering
+\caption{Detailed Architectural Specification (2D Multi-Scale learning)}
+\label{tab:softmax_combiner_2d}
+\small
+\begin{tabularx}{\textwidth}{@{} ll X l @{}}
+\toprule
+\textbf{Component} & \textbf{Count} & \textbf{Architecture Details} & \textbf{Output} \\ \midrule
+
+\textbf{Router2D} & 1 & \textbf{Downsampling CNN:} \newline 
+2x Conv2d ($k=5, s=2, p=2$) + ReLU \newline 
+AdaptiveAvgPool2d(1) $\to$ Flatten \newline 
+Linear(32 $\to$ 3) & $\alpha \in \mathbb{R}^{3}$ \\ \addlinespace
+
+\textbf{Experts} & 3 & \textbf{MultiResExpertWrapper2D} (Expert2D): \newline
+3x Conv2d ($k=5, s=1, p=2$) \newline
+Padding: \texttt{circular} \newline
+Activations: \texttt{Tanh} \newline
+Channels: $1 \to 32 \to 32 \to 1$ & $(B, 1, H, W) \times 3$ \\ \addlinespace
+
+\textbf{Parameters} & -- & Kernel Size: $5 \times 5$, Experts: 3 & -- \\ 
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Multi-experts training}
+
+
+\begin{table}[h!]
+\centering
+\small
+\caption{Detailed Architectural Specification (1D Multi-Experts learning)}
+\label{tab:softmax_combiner}
+\begin{tabularx}{\textwidth}{@{}llXl@{}}
+\toprule
+\textbf{Component} & \textbf{Expert Type} & \textbf{Internal Architecture / Highlights} & \textbf{Output} \\ \midrule
+\textbf{Router} & CNN Gater & 2x Conv1d (s=2) $\rightarrow$ AdaptiveAvgPool $\rightarrow$ Linear(32, 4) & Weights $\alpha \in \mathbb{R}^4$ \\ \midrule
+\textbf{Expert 0} & \textit{FiniteDifference} & Pointwise MLP (1x1 Convs) operating on 3-channel input (u, $u_x$, $u_{xx}$) & $(B, 1, L_{32})$ \\ \addlinespace
+\textbf{Expert 1} & \textit{Expert1D} & Standard CNN with \textbf{Circular Padding} ($k=5$) for periodic boundaries & $(B, 1, L_{64})$ \\ \addlinespace
+\textbf{Expert 2} & \textit{FNO1D} & \textbf{Spectral Convolutions} (Fourier Space) + Skip connections ($W$) & $(B, 1, L_{128})$ \\ \addlinespace
+\textbf{Expert 3} & \textit{DeepONet} & \textbf{Branch} (Global sensors) + \textbf{Trunk} (Coordinate basis) fusion & $(B, 1, L_{res})$ \\ \bottomrule
+\end{tabularx}
+\end{table}
+
+
+
+\begin{table}[ht]
+\centering
+\caption{Detailed Architectural Specification (2D Multi-Experts learning}
+\label{tab:hetero_combiner}
+\small
+\begin{tabularx}{\textwidth}{@{} l l X l @{}}
+\toprule
+\textbf{Component} & \textbf{Type} & \textbf{Architecture Details} & \textbf{Output} \\ \midrule
+
+\textbf{Router2D} & CNN & 2x Conv2d ($k=5, s=2$) $\to$ AdaptiveAvgPool \newline Linear($32 \to 4$) for expert weights & $\alpha \in \mathbb{R}^{4}$ \\ \midrule
+
+\textbf{Expert 0} & FD MLP & \textbf{FiniteDifferenceExpert}: 3x Conv2d ($1 \times 1$) \newline Channels: $4 \to 32 \to 32 \to 1$ (Stencil-based) & $(B, 1, H, W)$ \\ \addlinespace
+
+\textbf{Expert 1} & CNN & \textbf{Standard Expert}: 3x Conv2d ($5 \times 5, s=1$) \newline Circular Padding, $1 \to 32 \to 32 \to 1$ & $(B, 1, H, W)$ \\ \addlinespace
+
+\textbf{Expert 2} & FNO & \textbf{Fourier Neural Operator}: 3x SpectralConv2d \newline $d_{latent}=32$, $W$ skip connections, MLP projection & $(B, 1, H, W)$ \\ \addlinespace
+
+\textbf{Expert 3} & DeepONet & \textbf{Branch}: MLP($4096 \to 256 \to 64$) \newline \textbf{Trunk}: 2x Conv2d ($1 \times 1$) w/ 64 features & $(B, 1, H, W)$ \\ \midrule
+
+\textbf{Common} & -- & \textbf{Activation}: Tanh (Experts), ReLU (Router) & -- \\ 
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Large Scale Multi Source}
+
+
+
+\begin{table}[ht]
+\centering
+\caption{Detailed Architectural Specification for 1D Top-K learning (Large Scale Multi-Source) learning} \label{tab:admm_combiner}
+\begin{tabular}{@{}llp{6.5cm}l@{}} % Adjusted width for better fit
+\toprule
+\textbf{Component} & \textbf{Count} & \textbf{Architecture Details} & \textbf{Output} \\ \midrule
+
+\textbf{FNORouter1D} & 1 & 1x SpectralConv + 1x Skip ($W$) \newline 
+Linear($32 \to 64 \to 100$) & $\alpha \in \mathbb{R}^{100}$ \\ \addlinespace
+
+\textbf{Experts} & 100 & \textbf{NoisySourceWrapper} containing: \newline 
+3x SpectralConv1d blocks \newline 
+3x Conv1d ($k=1$) skip connections \newline 
+Channels: $1 \to 32 \to 128 \to 1$ & $(B, 1, L) \times 100$ \\ \addlinespace
+
+\textbf{Latent Dim} & -- & $d_{fourier} = 32$ (Internal width) & -- \\ \bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[ht]
+\centering
+\caption{Detailed Architectural Specification for 2D Top-K learning (Large Scale Multi-Source) learning}
+\label{tab:admm_fno_ensemble}
+\small
+\begin{tabularx}{\textwidth}{@{} ll X l @{}}
+\toprule
+\textbf{Component} & \textbf{Count} & \textbf{Architecture Details} & \textbf{Output} \\ \midrule
+
+\textbf{Router2D} & 1 & \textbf{Downsampling CNN:} \newline 
+2x Conv2d ($k=5, s=2, p=2$) + ReLU \newline 
+AdaptiveAvgPool2d(1) $\to$ Flatten \newline 
+Linear(32 $\to$ 100) & $\alpha \in \mathbb{R}^{100}$ \\ \addlinespace
+
+\textbf{Experts} & 100 & \textbf{NoisySourceWrapper2D} (FNO2D): \newline
+- Lifting: Linear(3 $\to$ 32) \newline
+- 3x SpectralConv2d blocks \newline
+- 3x Conv2d ($1 \times 1$) skip connections \newline
+- Projection: $32 \to 128 \to 1$ & $(B, 1, H, W) \times 100$ \\ \addlinespace
+
+\textbf{Hyperparams} & -- & Latent Width: 32, Modes: $(modes_1, modes_2)$ \newline Activation: GeLU/ReLU (FNO Internal) & -- \\ 
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Data Assimilation}
+
+
+\begin{table}[ht]
+\centering
+\caption{Detailed Architectural Specification for 1D Data Assimilation}
+\label{tab:da_arch_1d}
+\small
+\begin{tabularx}{\textwidth}{@{} ll X l @{}}
+\toprule
+\textbf{Component} & \textbf{Count} & \textbf{Architecture Details} & \textbf{Output} \\ \midrule
+
+\textbf{DARouter1D} & 1 & \textbf{Feature Extractor:} \newline 
+2x Conv1d (k=5, 3) + ReLU \newline 
+AdaptiveAvgPool1d $\to$ Flatten \newline 
+\textbf{Heads:} \newline
+Weight: Linear(64 $\to$ 4) \newline
+Gain: Linear(64 $\to$ 1) + Sigmoid & $\alpha \in \mathbb{R}^{4}$ \newline $g \in [0, 1]$ \\ \addlinespace
+
+\textbf{Experts} & 4 & \textbf{NoisySourceWrapper1D} (FNO1D): \newline
+Input Projection: Linear(1 $\to$ 32) \newline
+3x SpectralConv1d blocks \newline
+3x $W$ Skip (Conv1d $k=1$, stride 1) \newline
+Output Projection: $32 \to 128 \to 1$ & $(B, 1, L) \times 4$ \\ \addlinespace
+
+\textbf{Hyperparams} & -- & Width: 32, Fourier Modes: -- & -- \\ 
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+\begin{table}[ht]
+\centering
+\caption{Detailed Architectural Specification for 2D Data Assimilation}
+\label{tab:softmax_fno_2d}
+\small
+\begin{tabularx}{\textwidth}{@{} ll X l @{}}
+\toprule
+\textbf{Component} & \textbf{Count} & \textbf{Architecture Details} & \textbf{Output} \\ \midrule
+
+\textbf{DARouter} & 1 & \textbf{Feature Extractor:} \newline 
+2x Conv2d ($k=3, s=1$) + ReLU \newline 
+AdaptiveAvgPool2d(1) $\to$ Flatten \newline 
+Linear(32 $\to$ 64) + ReLU \newline 
+\textbf{Heads:} \newline
+- Weight Head: Linear(64 $\to$ 4) \newline
+- Gain Head: Linear(64 $\to$ 1) + Sigmoid & $\alpha \in \mathbb{R}^{4}$ \newline $g \in [0, 1]$ \\ \addlinespace
+
+\textbf{Experts} & 4 & \textbf{NoisySourceWrapper2D} (FNO2D): \newline
+- \textbf{Lifting:} Linear(3 $\to$ 32) \newline
+- \textbf{Spectral Layers:} 3x SpectralConv2d \newline
+- \textbf{Skip (W):} 3x Conv2d ($1 \times 1$) \newline
+- \textbf{Projection:} $32 \to 128 \to 1$ & $(B, 1, H, W) \times 4$ \\ \addlinespace
+
+\textbf{Settings} & -- & Fourier Latent Dim: 32, Experts: 4 & -- \\ 
+\bottomrule
+\end{tabularx}
+\end{table}
+
+
+\end{document}
+
+

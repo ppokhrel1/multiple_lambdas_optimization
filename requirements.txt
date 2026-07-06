@@ -1,0 +1,7 @@
+# Python dependencies for the multi-source optimization experiments.
+# Install with:  pip install --break-system-packages -r requirements.txt
+torch>=2.0
+numpy
+matplotlib
+pandas
+sympy
