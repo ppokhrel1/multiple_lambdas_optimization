@@ -1,0 +1,451 @@
+\documentclass{article}
+\usepackage{natbib}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+
+\usepackage[autostyle]{csquotes}
+
+\usepackage{enumitem}
+\newenvironment{QandA}{\begin{enumerate}[label=\bfseries\alph*.]\bfseries}
+                      {\end{enumerate}}
+\newenvironment{answered}{\par\normalfont}{}
+\usepackage{lipsum}
+\usepackage{hyperref}
+\pagestyle{empty}
+
+% ---- Change-highlight macros (were used but never defined in the original) ----
+\newcommand{\rtwo}[1]{\textcolor{blue}{#1}}      % Reviewer 2 changes
+\newcommand{\rthree}[1]{\textcolor{teal}{#1}}    % Reviewer 3 changes
+\newcommand{\audit}[1]{\textcolor{magenta}{#1}}  % consistency/audit fixes
+
+\usepackage[
+    backend=biber,
+    style=ieee,
+  ]{biblatex}
+
+\addbibresource{lagrangian.bib} %Imports bibliography file
+\renewcommand*{\multicitedelim}{} %citations with no spaces in groups
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{definition}{Definition}
+\newtheorem{remark}{Remark}
+\newtheorem{assumption}{Assumption}
+\newtheorem{corollary}[theorem]{Corollary}
+
+\title{Response to Reviewers}
+
+\author{Anonymous Author(s)}
+
+\begin{document}
+\maketitle
+
+Re: JCOMP-D-25-01237R1
+
+\medskip
+
+We thank the Associate Editor and both reviewers for the careful re-reading of our manuscript and for the constructive feedback. We particularly appreciate Reviewer~2's observation that our previous response letter contained claims that were not fully reflected in the manuscript itself.
+Taking this criticism seriously, we have performed a \emph{full consistency pass} between this response letter and the revised manuscript before resubmission. Every change described below carries a corresponding section reference, and we have audited the manuscript end-to-end (including all tables, figures, and cross-references) to ensure no further discrepancies remain.
+
+In the revised manuscript, we have indicated changes by color:
+{\color{blue}\textbf{blue}} for changes responding to Reviewer~2,
+{\color{teal}\textbf{teal}} for changes responding to Reviewer~3, and
+{\color{magenta}\textbf{magenta}} for consistency and notation fixes that
+address concerns raised across both reviewers (and that we identified during
+the audit).
+
+\section*{Summary of major revisions}
+
+\begin{enumerate}[leftmargin=*,itemsep=0.3em]
+    \item All occurrences of ``1D Navier--Stokes'' have been corrected to
+    ``1D Burgers equation'' throughout the manuscript and table captions, since
+    the governing equation $\partial_t u + u\partial_x u = \nu\partial_{xx} u$
+    used in our 1D experiments is the viscous Burgers equation. (The only
+    remaining textual occurrence was in a commented-out, non-compiled
+    paragraph, which has now been deleted from the source.)
+    \item Symbol overloading ($\lambda$, $w$, $c$) has been resolved through a
+    systematic notation pass.
+    \item Theorem~1 has been relabeled Proposition~1, made fully self-contained
+    by an explicit definition paragraph, and its proof sketch moved to the
+    appendix. \audit{The heuristic crossover result (former Theorem~3) has
+    likewise been reclassified as a Proposition; see A.3.7.}
+    \item A roadmap paragraph has been added at the end of \S1.
+    \item Figures~2, 4, and~7 have been reformatted for readability, and the
+    Figure~2 caption has been corrected.
+    \item \audit{The experimental figures have been fully regenerated so that
+    every convergence figure and weight-evolution figure is derived from the
+    same run logs as the corresponding table (see A.1.1 and A.3.8).}
+    \item A numerical audit of Tables~2--5 identified several inconsistencies,
+    which have been corrected (see \S\ref{sec:audit} below).
+\end{enumerate}
+
+\begin{QandA}
+Reviewer #2: The revised manuscript is improved, but I do not think it is yet ready for acceptance. The authors have clearly made an effort to expand the discussion and revise parts of the theory and experiments, but several important concerns remain only partially addressed. There are still noticeable inconsistencies between the response letter and the revised manuscript itself. The response states that some low-value theorem material was removed and that terminology was corrected throughout, yet related issues remain visible in the manuscript (for instance, the proof of Theorem 1 does not appear to add substantial value and could be moved to the appendix, and the revised manuscript still contains occurrences of 1D Navier-Stokes). I recommend that the authors perform a full consistency pass between the response letter and the actual manuscript before any further consideration.
+\end{QandA}
+
+\begin{answered}
+We thank the reviewer for this pointed observation; it was justified, and we
+have addressed both specific items, together with a full consistency pass:
+
+\textbf{(a) Proof of Theorem~1 moved to the appendix.} The proof sketch
+formerly appearing in the main text has been moved to
+Appendix~A.2.1 in the revised manuscript, leaving only the proposition statement and the \emph{Link to Experimental Results} discussion (which we believe earns its place in the main narrative) in \S4.4. A one-line forward reference (``The derivation is given in Appendix~A.2.1.'') replaces the in-text proof.
+
+\textbf{(b) ``1D Navier--Stokes'' corrected to ``1D Burgers''.} The reviewer
+is correct: the governing equation we use in 1D,
+$\partial_t u + u\partial_x u = \nu\partial_{xx} u$, is the viscous Burgers
+equation, not Navier--Stokes. We have globally
+replaced ``1D Navier--Stokes'' with ``1D Burgers'' (or ``1D viscous Burgers''
+where the viscosity is salient). Mixed phrases such as ``1D and 2D
+Navier--Stokes'' have been rewritten to ``1D Burgers and 2D Navier--Stokes.''
+\audit{We further note that the single remaining occurrence of ``1D Navier
+Stokes'' was located inside a commented-out (non-compiled) paragraph in the
+source; that paragraph has now been deleted, so no occurrence remains in
+either the compiled PDF or the source.}
+
+\textbf{(c) Full consistency pass.} Beyond these two items, we have audited
+the manuscript for further discrepancies between the response letter and the
+text. The remaining points raised by Reviewer~2 below are addressed
+individually. Additional inconsistencies we identified during the audit
+are listed in \S\ref{sec:audit}.
+\end{answered}
+
+\begin{QandA}
+A major remaining issue is notation. The paper still overloads symbols,
+especially $\lambda$, which is used for source weights while also appearing
+in standard augmented-Lagrangian notation as a multiplier in the background
+discussion. The manuscript also shifts between $\lambda$ and $w$ for weights,
+and uses $c$ both for a cost vector and for generic constraint functions.
+These choices make the theory harder to follow than necessary and should be
+cleaned up systematically.
+\end{QandA}
+
+\begin{answered}
+We agree, and have made the following systematic changes:
+
+\textbf{(i) Resolving the $\lambda$ collision.}
+In the background sections (\S2.3, \S2.4) we previously wrote standard
+augmented-Lagrangian and ADMM formulas with $\lambda$ as the multiplier,
+which collides with our use of $\lambda$ as the simplex source-weight vector
+throughout \S3--\S6. We have renamed the generic multiplier in the background
+formulas from $\lambda$ to $y$. Equation~(3) now reads
+\[
+    \mathcal{L}_\rho(x, y) = f(x) + y^\top c(x) + \frac{\rho}{2}\|c(x)\|^2,
+\]
+and Eqs.~(4)--(7) have been updated accordingly. A note on first use
+explains the choice:
+``We use $y$ for the generic Lagrange multiplier in this background section to reserve $\lambda$ for source weights used throughout the rest of the paper.''
+
+\textbf{(ii) Eliminating the $\lambda$/$w$ shift.}
+Source weights are now denoted $\lambda$ \emph{everywhere}, including the
+Data Assimilation background/analysis update (\S5.6), with $K$ reserved for
+the Kalman gain.
+
+\textbf{(iii) Reserving $c$ for the cost vector.}
+The symbol $c$ is now used exclusively for the per-source cost vector
+$c \in \mathbb{R}^n_+$. As part of this pass we also
+corrected a mathematical error in the proof sketch of (former) Theorem~1:
+because the budget constraint enters the augmented Lagrangian through the
+one-sided penalty $\tfrac{\rho}{2}\max\{0,\,c^\top\lambda - B\}^2$,
+its gradient with respect to $\lambda$ is $\rho\,\max\{0,\,c^\top\lambda - B\}\,c$,
+not the ill-defined expression previously written. The corrected expression
+appears in Proposition~1 (\S4.4) and in the moved proof (Appendix~A.2.1).
+\end{answered}
+
+\begin{QandA}
+The presentation of Theorem 1 is also still not sufficiently clear. The theorem compresses several method-specific gradient forms into one statement, but several symbols are not defined clearly enough for the result to be self-contained.
+\end{QandA}
+
+\begin{answered}
+We have rewritten the statement to be fully self-contained, and re-classified
+it. Specifically:
+
+\textbf{(i) Definition paragraph preceding the statement.}
+A new paragraph immediately preceding the result defines every symbol
+(the Softmax logits $\alpha$ and Jacobian $J_\sigma$; the multipliers
+$\mu,\nu,\nu_{\text{budget}}$; the penalty $\rho$; the cost vector $c$ and
+budget $B$; the tangent-space projection $\Pi_{\mathcal{T}_\Delta}$; and the
+ADMM auxiliary variable $z_{k+1}$ with the simplex indicator subdifferential
+$\partial I_{\Delta^{n-1}}$).
+
+\textbf{(ii) Each row of the equation now has a correct, method-specific LHS}
+(gradient w.r.t.\ logits for Softmax; a projected update direction for the
+single-timescale variant; the augmented-Lagrangian gradient with the corrected
+one-sided budget term; and a first-order optimality \emph{inclusion} for ADMM).
+
+\textbf{(iii) Reclassification as Proposition~1.}
+The result derives method-specific update rules from a unified Lagrangian via
+routine calculus; we agree this is better labeled as a proposition. It is now
+\rtwo{Proposition~1 (Method-Specific Weight Update Directions)}. \audit{Of the
+remaining numbered results, Theorems~2 and~4 retain their designation, while
+the crossover result (\S4.7) is now stated as Proposition~3, since it is a
+heuristic order-of-magnitude scaling estimate rather than a rigorously proven
+bound (see A.3.7).}
+
+\textbf{(iv) Proof moved to appendix} (per Point~2.1).
+\end{answered}
+
+\begin{QandA}
+The introduction would also benefit from a short roadmap paragraph at the end. At present, it moves from the contribution bullets directly into the next section, which is not ideal for a paper of this length and complexity.
+\end{QandA}
+
+\begin{answered}
+We have added a roadmap paragraph immediately following the three contribution
+bullets in \S1:
+
+\emph{``The remainder of the paper is organized as follows.
+Section~2 surveys related work in multi-task and multi-modal learning,
+mixture-of-experts routing, constrained deep learning, multi-timescale
+optimization, physical-systems integration, data assimilation, and the
+machine-learning architectures we use. Section~3 introduces the augmented
+Lagrangian formulation with budget constraints. Section~4 develops the
+unified theoretical framework: notation and basic assumptions (\S4.1--\S4.2),
+the unified problem (\S4.3), the method-specific weight update directions
+(Proposition~1, \S4.4), convergence rates (Theorem~2, \S4.5--\S4.6), the
+ADMM/Augmented-Lagrangian crossover analysis (\audit{Proposition~3}, \S4.7), and
+numerical precision bounds (Theorem~4, \S4.8). Section~5 reports four
+experimental studies---expert routing, multi-resolution learning, large-scale
+source integration, and data assimilation---across 1D Burgers and 2D
+Navier--Stokes regimes. Section~6 discusses trade-offs between Softmax and
+constrained methods, and Section~7 concludes with future directions.''}
+\end{answered}
+
+\begin{QandA}
+Finally, figure presentation still needs improvement. While the figures appear to have been revised, readability remains an issue, and the Figure 2 caption appears to contain formatting or rendering problems.
+\end{QandA}
+
+\begin{answered}
+We have reformatted the figures and corrected the caption:
+
+\textbf{(i) Readability.} All convergence and weight-evolution figures have
+been regenerated at higher resolution with substantially enlarged fonts
+(titles, axis labels, ticks, and legends), tightened inter-panel spacing, and
+thicker lines, and are exported as vector PDF so they remain crisp at any zoom.
+The stacked weight-evolution panels now fill the full plot width and use
+descriptive legends (architecture names for expert routing; resolutions for
+multi-resolution) rather than generic ``Source~$i$'' labels.
+
+\textbf{(ii) Figure~2 caption.} The revised caption now identifies each expert:
+\rtwo{``Experts: $\lambda_1$ (FiniteDiff), $\lambda_2$ (CNN), $\lambda_3$ (FNO),
+$\lambda_4$ (DeepONet).''} and the en-dash rendering artifact
+(``$\lambda_1$--$\lambda_4$'') has been fixed.
+\end{answered}
+
+\begin{QandA}
+Reviewer 3: The manuscript establishes a theoretical framework for optimal weight learning in multi-source scientific machine learning [\ldots]. After carefully reading the revised manuscript, I find that the authors have clearly and satisfactorily addressed the previously raised concerns [\ldots]. I believe the paper is suitable for publication after careful reformatting and final polishing.
+\end{QandA}
+
+\begin{answered}
+    We thank the reviewer for the positive assessment and have carried out the
+    requested final reformatting and polishing (notation, figure readability,
+    table formatting, and the consistency audit in \S\ref{sec:audit}).
+\end{answered}
+
+\section*{Additional consistency audit}
+\label{sec:audit}
+
+In addition to the points raised by the reviewers, we performed a full
+numerical and cross-reference audit of the revised manuscript and identified
+several remaining inconsistencies, all of which have now been corrected. We
+list them here in the interest of transparency and to support the editor's
+required ``changes made'' documentation.
+
+\subsection*{A.1 Table corrections}
+
+\begin{enumerate}[leftmargin=*,itemsep=0.4em]
+    \item \audit{Table~3 (multi-resolution) fully re-extracted from the run
+    logs.} Several 1D rows previously contained weights that did not sum to
+    unity, together with Test-MSE and cost values that were not consistent
+    with the corresponding convergence figures. The entire table (Test MSE,
+    cost, wall-clock time, and $\lambda_1,\lambda_2,\lambda_3$ weights, plus the
+    single-resolution baselines) has been re-extracted from the same run logs
+    that generate Figures~3--4, so that table, figures, and log summaries now
+    agree exactly. In the 1D block the lowest Test~MSE is achieved by ADMM
+    ($3.90\times10^{-5}$), with the Improved and standard Lagrangian close
+    behind ($5.30\times10^{-5}$ and $5.40\times10^{-5}$); all weight rows now
+    sum to unity up to rounding, and the corresponding text in \S5.4 has been
+    updated to match.
+
+    \item \audit{Table~3, 1D, baseline costs.} The single-resolution baseline
+    costs now follow the cost-doubling pattern
+    (Base~32: $1.000$, Base~64: $2.000$, Base~128: $4.000$) consistently in
+    both the 1D and 2D blocks.
+
+    \item \audit{Source count in \S5.5.} The Problem Formulation, Eq.~(30), and
+    surrounding text now consistently use $N = 100$ sources (matching Table~4's
+    caption ``selection of 10 sources out of 100'' and the architecture
+    specifications in Tables~B.10--B.11).
+
+    \item \audit{Timing columns in Tables~2 and~3 (2D rows).}
+    The 2D timing values in Tables~2 and~3 were previously near-identical due to
+    a copy-paste error, despite reflecting different experiments. The Table~3
+    timing column has been re-extracted from the multi-resolution run logs and
+    now differs from Table~2 (e.g., 2D Softmax: $2052.97$\,s in Table~2 vs
+    $3729.00$\,s in Table~3). All timing columns were re-checked against the
+    logs.
+
+    \item \audit{Time-column formatting.} All Time~(s) columns now use a uniform
+    two-decimal-seconds format without thousands separators.
+
+    \item \audit{Method ordering across tables.} All tables now follow a uniform
+    order: Softmax, Lagrangian, ImpLagrangian, AugLag, ADMM.
+
+    \item \audit{Method-name standardization.} ``Improved Augmented Lagrangian''
+    is written in full on first occurrence in each section and abbreviated
+    ``ImpLagrangian'' consistently thereafter; ``Auglag''/``AugLag'' are unified
+    as ``AugLag'' throughout.
+
+    \item \audit{Bold-best convention.} For every table claiming ``best results
+    in bold,'' we re-verified that the bolded entry is the column optimum among
+    the routing methods; several previously mis-bolded entries (e.g., in the
+    multi-resolution 1D block) have been corrected.
+
+    \item \audit{Consistent metric reported across convergence figures.} We
+    verified that every convergence figure (Figs.~1, 3, 5, 6) plots the
+    \emph{test} MSE/loss, matching the Test-MSE columns of Tables~2--5; the
+    plotting scripts were corrected where they had previously read the
+    train/validation column.
+\end{enumerate}
+
+\subsection*{A.2 In-text inconsistencies}
+
+\begin{enumerate}[leftmargin=*,itemsep=0.4em]
+    \item \audit{Conclusion, $\lambda_3$ value.} The Conclusion now refers to
+    the AugLag value $\lambda_3 = 0.734$ (2D expert routing), consistent with
+    Table~2; the spurious value $0.660$ has been removed.
+
+    \item \audit{Duplicate paragraph in \S4.8.} The near-duplicate
+    \emph{Link to Experimental Results} paragraph (which incorrectly cited
+    ``$\lambda_i \approx 0.044$ in Table~5'') has been removed; the surviving
+    paragraph correctly cites ``$S_1 \approx 0.035$ in Table~5'' (1D Softmax).
+
+    \item \audit{Binary-convergence claim qualified.} The claim that Lagrangian
+    weights converge to exact $0/1$ values has been qualified to hold where it
+    is supported: exact $0/1$ in the 1D Data Assimilation regime (Table~5), and
+    sparse boundary-attaining distributions in 2D (e.g.\ $\lambda=(0.537,0.463,0,0)$).
+
+    \item \audit{Unresolved cross-reference.} The stray ``Fig.~??'' reference in
+    \S5.5 has been fixed.
+
+    \item \audit{DeepONet sensor count.} \S5.3 now specifies ``128 sensors in 1D
+    and 4096 sensors (the full $64\times 64$ grid) in 2D,'' consistent with the
+    fact that the expert-routing 2D experiment operates on a $64\times64$ grid
+    (Table~B.9).
+
+    \item \audit{Appendix-table captions.} The doubled ``learning'' in the
+    captions of Tables~B.10--B.11 has been removed, and the ``Multi-Scale'' vs
+    ``Multi-resolution'' caption wording has been unified.
+
+    \item \audit{Data-assimilation budget stated.} The resource budget used in
+    the Data Assimilation study is now stated explicitly in \S5.6
+    ($B=2.0$ in 1D and $B=2.5$ in 2D), matching the final cost column of
+    Table~5 (1D costs $\approx 2.0$; 2D costs $\le 2.5$) and the run
+    configuration.
+\end{enumerate}
+
+\subsection*{A.3 Mathematical, experimental, and structural corrections}
+
+\begin{enumerate}[leftmargin=*,itemsep=0.4em]
+    \item \audit{Theorem~4, Softmax row.} The proof sketch now identifies the
+    correct mechanism for the $\kappa\to\infty$ blow-up: it arises from
+    $\kappa_\alpha$ (the condition number of the logit-to-weight map), which
+    diverges as $\min_i\lambda_i\to 0$. The statement is unchanged.
+    \audit{We additionally clarified that the bounded quantity is the
+    error in the preconditioned Adam \emph{update} direction, with the raw
+    gradient error obeying $\|\hat\nabla L_m-\nabla L_m\|\le\epsilon_{\text{machine}}\kappa_m\|\nabla L_m\|$
+    (Assumption~3), amplified by the Adam preconditioner.}
+
+    \item \audit{Theorem~2 redundancy.} The two previously identical bounds for
+    the Augmented and Improved Augmented Lagrangian are now a single equation
+    with method-dependent constants, noting
+    $C_\lambda^{\text{ImpLag}} \le C_\lambda^{\text{AugLag}}$. \audit{We also
+    corrected the ADMM primal rate to $O(1/\sqrt{k})$ (consistent with the
+    non-convex coupling), with only the budget feasibility decaying
+    geometrically.}
+
+    \item \audit{Algorithm~1 projection symbol.} Algorithm~1 and Proposition~1
+    now consistently use the tangent-space projection $\Pi_{\mathcal{T}_\Delta}$.
+
+    \item \audit{Erroneous citation removed.} The unrelated RGB-T saliency
+    reference formerly cited for multi-timescale ADMM has been replaced with
+    \cite{zeng2021admm_constrained_problems_convergence_saturation, chen2017note_admm_constrained_problems, boyd2011distributed}.
+    \audit{A duplicate bibliography entry for the same multi-fidelity review
+    (previously cited under two keys, appearing as two separate references) has
+    also been de-duplicated, and the ``adaptive ensemble methods'' citation in
+    \S1 repointed to an ensemble-methods reference.}
+
+    \item \audit{Abstract claim re Single-timescale AL.} The abstract now reads:
+    \audit{``\ldots~For single-timescale Augmented Lagrangian coupling, by
+    contrast, we establish sufficient conditions under which it achieves
+    sublinear convergence governed by an effective condition number that
+    quantifies the curvature imbalance between primal and dual variables.''}
+
+    \item \audit{Section-overview ordering in \S5.} The \S5 overview paragraph
+    now matches the actual subsection order.
+
+    \item \audit{Reclassification of the crossover result and proofs added.}
+    The Adaptive Crossover Point (former Theorem~3) is now stated as
+    Proposition~3 and explicitly described as a heuristic scaling estimate,
+    since its exact form (in particular the Adam factor $(1-\beta_1)/(1-\beta_2)$)
+    is an order-of-magnitude argument rather than a proven bound; the
+    per-iteration cost model is grounded in the sort-based $O(n\log n)$ simplex
+    projection actually used in the code. In compensation we added full proofs
+    of Theorems~2 and~4 in the appendix (descent-lemma/two-time-scale and
+    floating-point error-propagation arguments, respectively).
+
+    \item \audit{Grid sizes reconciled with the released code.} The large-scale
+    integration study (\S5.5) now correctly states a 64-point grid in 1D and a
+    $64\times64$ grid in 2D, matching the implementation; the previous
+    ``256-point / $128\times128$'' description has been corrected. The data
+    assimilation study remains at 128 points (1D) and $128\times128$ (2D) as in
+    the code.
+
+    \item \audit{Learning-rate schedule reconciled with the code.} The manuscript
+    previously described a ``decaying (step-decay) learning-rate schedule.'' The
+    released code uses fixed learning rates (primal $\eta_\theta=\eta_\lambda=10^{-5}$;
+    dual/multiplier ascent $10^{-2}$--$10^{-3}$; weight decay $10^{-7}$) with no
+    scheduler. We corrected the stated learning rates in \S5.2 and reframed the
+    text (\S4.5, \S5.2): the runs operate in the constant-step
+    stochastic-approximation regime and converge to a neighborhood of the
+    optimum, which the asymptotic $O(1/\sqrt{k})$/$O(1/k)$ rates of Theorem~2
+    idealize---consistent with the residual fluctuations visible in the
+    convergence figures. The ``step decay'' claims have been removed.
+\end{enumerate}
+
+\bigskip
+\hrule
+\bigskip
+
+\section*{Data availability}
+
+\begin{answered}
+\rthree{All data used in our study were generated using the accompanying code,
+which will be made available at
+\url{https://github.com/ppokhrel1/multiple_lambdas_optimization}.}
+\end{answered}
+
+\bigskip
+
+\noindent We are grateful to both reviewers for their careful attention to
+this work, and to Reviewer~2 in particular for the rigor with which the
+consistency between the response letter and the manuscript was checked. We
+hope the present revision and accompanying audit make the manuscript ready
+for acceptance.
+
+\bigskip
+
+\noindent With best regards,
+
+\medskip
+
+\noindent Pujan Pokhrel, on behalf of the authors
+
+\printbibliography
+
+\end{document}

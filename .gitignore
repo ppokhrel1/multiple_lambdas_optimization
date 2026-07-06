@@ -1,0 +1,15 @@
+# Large artifacts / results — keep the repo code-only
+*.pth
+*.pt
+*.txt
+*.png
+*.pdf
+*.npy
+*.npz
+*.swp
+.DS_Store
+__pycache__/
+*.pyc
+results/
+run_1d.log
+run_2d.log
