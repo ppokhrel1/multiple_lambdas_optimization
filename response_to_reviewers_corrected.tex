@@ -406,16 +406,17 @@ required ``changes made'' documentation.
     assimilation study remains at 128 points (1D) and $128\times128$ (2D) as in
     the code.
 
-    \item \audit{Learning-rate schedule reconciled with the code.} The manuscript
-    previously described a ``decaying (step-decay) learning-rate schedule.'' The
-    released code uses fixed learning rates (primal $\eta_\theta=\eta_\lambda=10^{-5}$;
-    dual/multiplier ascent $10^{-2}$--$10^{-3}$; weight decay $10^{-7}$) with no
-    scheduler. We corrected the stated learning rates in \S5.2 and reframed the
-    text (\S4.5, \S5.2): the runs operate in the constant-step
-    stochastic-approximation regime and converge to a neighborhood of the
-    optimum, which the asymptotic $O(1/\sqrt{k})$/$O(1/k)$ rates of Theorem~2
-    idealize---consistent with the residual fluctuations visible in the
-    convergence figures. The ``step decay'' claims have been removed.
+    \item \audit{Learning-rate schedule reconciled with the code (two-time-scale).}
+    To make the experiments faithful to the two-time-scale analysis, we updated
+    the code so that the source weights are optimized on a slower time scale than
+    the model parameters: primal $\eta_\theta=10^{-5}$ for the model parameters and
+    $\eta_\lambda=10^{-7}$ for the source weights (i.e., $\eta_\lambda \ll \eta_\theta$,
+    realizing $\eta_\lambda=O(\eta_\theta^2)$ of Assumption~4), dual/multiplier
+    ascent $10^{-2}$--$10^{-4}$, and weight decay $10^{-7}$, with both primal step
+    sizes following a step-decay schedule (halved every $150$ epochs). \S5.2 now
+    states these learning rates and \S4.5/\S5.2 describe the two-time-scale,
+    diminishing-step regime under which the asymptotic $O(1/\sqrt{k})$/$O(1/k)$
+    rates of Theorem~2 apply.
 \end{enumerate}
 
 \bigskip
