@@ -1033,8 +1033,8 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
     router_params = [p for n, p in combiner.named_parameters() if ('lam' not in n) and ('router' in n)]
     dual_params = [p for n, p in combiner.named_parameters() if 'lam' in n ]
 
-    ETA_THETA = 1e-5
-    ETA_LAMBDA = 1e-7  # two-time-scale (Assumption 4): source-weight router updates ~100x slower than theta
+    ETA_THETA = 1e-3   # aligned with manuscript Sec 5.2 (eta_theta=1e-3); 1e-5 left model+router under-trained
+    ETA_LAMBDA = 1e-6  # == ETA_THETA**2 (Assumption 4); 1e-7 froze the router near uniform -> routing lost to baselines
     opt_primal = optim.Adam([
         {'params': model_params,  'lr': ETA_THETA},
         {'params': router_params, 'lr': ETA_LAMBDA},
