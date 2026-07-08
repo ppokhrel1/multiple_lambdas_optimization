@@ -58,8 +58,8 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
     router_params = [p for n, p in combiner.named_parameters() if ('lam' not in n) and ('router' in n)]
     dual_params = [p for n, p in combiner.named_parameters() if 'lam' in n ]
 
-    ETA_THETA = 1e-5
-    ETA_LAMBDA = 1e-7  # two-time-scale (Assumption 4): source-weight router updates ~100x slower than theta
+    ETA_THETA = 1e-4
+    ETA_LAMBDA = 1e-6  # two-time-scale (Assumption 4): source-weight router updates ~100x slower than theta
     opt_primal = optim.Adam([
         {'params': model_params,  'lr': ETA_THETA},
         {'params': router_params, 'lr': ETA_LAMBDA},
@@ -67,7 +67,7 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
     sched_primal = optim.lr_scheduler.StepLR(opt_primal, step_size=150, gamma=0.5)  # diminishing-step schedule
     opt_dual = optim.Adam(dual_params, lr=1e-3, maximize=True) if dual_params else None
 
-    loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3).to(device)
+    loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3, dealias=True).to(device)
     history = {'train_mse': [], 'val_mse': [], 'test_mse': [], 'cost': []}
 
     for epoch in range(500):
@@ -201,7 +201,7 @@ def train_heterogeneous_experts_2d(device):
         model = conf['model'].to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3)
         # PINNLoss2D often uses a high weight for MSE to ensure convergence
-        loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3).to(device)
+        loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3, dealias=True).to(device)
 
         epochs = 20
         for epoch in range(epochs):
@@ -263,9 +263,9 @@ def main():
         #for p in e.parameters(): p.requires_grad = False
 
     print("\nGenerating Datasets...")
-    train_x, train_y = generate_2d_data(num_samples=200, nx=128, steps=20, device=device)
-    val_x, val_y     = generate_2d_data(num_samples=50, nx=128, steps=20, device=device)
-    test_x, test_y   = generate_2d_data(num_samples=50, nx=128, steps=20, device=device)
+    train_x, train_y = generate_2d_data(num_samples=500, nx=128, steps=20, device=device)
+    val_x, val_y     = generate_2d_data(num_samples=100, nx=128, steps=20, device=device)
+    test_x, test_y   = generate_2d_data(num_samples=100, nx=128, steps=20, device=device)
 
     train_loader = DataLoader(TensorDataset(train_x, train_y), batch_size=32, shuffle=True)
     val_loader   = DataLoader(TensorDataset(val_x, val_y), batch_size=32)
@@ -348,5 +348,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
