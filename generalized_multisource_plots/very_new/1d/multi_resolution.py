@@ -639,12 +639,12 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
 
     # 2. Initialize Optimizers
     # Primal: Adam (Minimizes Loss)
-    ETA_THETA = 1e-4   # aligned with manuscript Sec 5.2 (eta_theta=1e-3); 1e-5 left model+router under-trained
-    ETA_LAMBDA = 1e-6  # == ETA_THETA**2 (Assumption 4); 1e-7 froze the router near uniform -> routing lost to baselines
+    ETA_THETA = 2e-5   # aligned with manuscript Sec 5.2 (eta_theta=1e-3); 1e-5 left model+router under-trained
+    ETA_LAMBDA = 2e-7  # == ETA_THETA**2 (Assumption 4); 1e-7 froze the router near uniform -> routing lost to baselines
     opt_primal = optim.Adam([
         {'params': model_params,  'lr': ETA_THETA},
         {'params': router_params, 'lr': ETA_LAMBDA},
-    ], weight_decay=1e-7)
+    ], weight_decay=1e-8)
     sched_primal = optim.lr_scheduler.StepLR(opt_primal, step_size=150, gamma=0.5)  # diminishing-step schedule
 
     # Dual: SGD with maximize=True (Maximizes Lagrangian w.r.t Duals)
@@ -958,4 +958,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
