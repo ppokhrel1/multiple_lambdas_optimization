@@ -10,6 +10,6 @@
 .DS_Store
 __pycache__/
 *.pyc
-results/
+#results/
 run_1d.log
 run_2d.log
