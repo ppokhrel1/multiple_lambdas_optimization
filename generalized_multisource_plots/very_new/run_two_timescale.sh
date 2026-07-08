@@ -26,9 +26,9 @@ run_dim () {  # dim gpu da_budget   -- runs this dimension's experiments sequent
   local dim=$1 gpu=$2 da_b=$3
   export CUDA_VISIBLE_DEVICES=$gpu
   #run_one "$dim" multi_experts    3.0
-  #run_one "$dim" multi_resolution 3.0
+  run_one "$dim" multi_resolution 3.0
   #run_one "$dim" large_scale      3.0
-  run_one "$dim" data_assimilation "$da_b"
+  #run_one "$dim" data_assimilation "$da_b"
 }
 
 echo "Launching 1D on GPU 0 and 2D on GPU 1 in parallel..."
