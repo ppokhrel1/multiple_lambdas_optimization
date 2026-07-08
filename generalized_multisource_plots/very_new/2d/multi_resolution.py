@@ -1033,8 +1033,8 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
     router_params = [p for n, p in combiner.named_parameters() if ('lam' not in n) and ('router' in n)]
     dual_params = [p for n, p in combiner.named_parameters() if 'lam' in n ]
 
-    ETA_THETA = 1e-3   # aligned with manuscript Sec 5.2 (eta_theta=1e-3); 1e-5 left model+router under-trained
-    ETA_LAMBDA = 1e-6  # == ETA_THETA**2 (Assumption 4); 1e-7 froze the router near uniform -> routing lost to baselines
+    ETA_THETA = 5e-5   # aligned with manuscript Sec 5.2 (eta_theta=1e-3); 1e-5 left model+router under-trained
+    ETA_LAMBDA = 5e-7  # == ETA_THETA**2 (Assumption 4); 1e-7 froze the router near uniform -> routing lost to baselines
     opt_primal = optim.Adam([
         {'params': model_params,  'lr': ETA_THETA},
         {'params': router_params, 'lr': ETA_LAMBDA},
@@ -1042,7 +1042,7 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
     sched_primal = optim.lr_scheduler.StepLR(opt_primal, step_size=150, gamma=0.5)  # diminishing-step schedule
     opt_dual = optim.Adam(dual_params, lr=1e-3, maximize=True) if dual_params else None
 
-    loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3).to(device)
+    loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3, dealias=True).to(device)  # match generator's 2/3-rule dealiasing; removes k^2 high-freq gradient noise driving oscillation
 
     # Track stats
     history = {
@@ -1262,10 +1262,10 @@ def main():
     # 2. Generate Dataset (High Res Target)
     print("Generating High-Res (64x64) Datasets...")
     # Train/Val/Test
-    train_x, train_y = generate_2d_data(num_samples=200, nx=128, steps=20, device=device)
-    test_x, test_y = generate_2d_data(num_samples=50, nx=128, steps=20, device=device)
+    train_x, train_y = generate_2d_data(num_samples=500, nx=128, steps=20, device=device)
+    test_x, test_y = generate_2d_data(num_samples=200, nx=128, steps=20, device=device)
 
-    val_x, val_y = generate_2d_data(num_samples=50, nx=128, steps=20, device=device,)
+    val_x, val_y = generate_2d_data(num_samples=200, nx=128, steps=20, device=device,)  # was 50; larger val set averages out single hard/low-nu trajectories that spiked val MSE
 
 
     train_loader = DataLoader(TensorDataset(train_x, train_y), batch_size=32, shuffle=True)
@@ -1337,5 +1337,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
