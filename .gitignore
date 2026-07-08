@@ -1,7 +1,7 @@
 # Large artifacts / results — keep the repo code-only
 *.pth
 *.pt
-*.txt
+#*.txt
 *.png
 *.pdf
 *.npy
