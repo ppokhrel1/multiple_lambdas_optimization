@@ -18,16 +18,16 @@ run_one () {  # dim exp budget   (CUDA_VISIBLE_DEVICES set by run_dim)
   local dim=$1 exp=$2 b=$3
   mkdir -p "$dim/results/$exp"
   echo ">>> [gpu ${CUDA_VISIBLE_DEVICES}] $dim/$exp budget=$b"
-  ( cd "$dim" && python -u "$exp.py" "$b" > "results/$exp/$b.txt" 2>&1 )
+  ( cd "$dim" && python3 -u "$exp.py" "$b" > "results/$exp/$b.txt" 2>&1 )
   echo "    -> $dim/results/$exp/$b.txt"
 }
 
 run_dim () {  # dim gpu da_budget   -- runs this dimension's experiments sequentially on one GPU
   local dim=$1 gpu=$2 da_b=$3
   export CUDA_VISIBLE_DEVICES=$gpu
-  run_one "$dim" multi_experts    3.0
-  run_one "$dim" multi_resolution 3.0
-  run_one "$dim" large_scale      3.0
+  #run_one "$dim" multi_experts    3.0
+  #run_one "$dim" multi_resolution 3.0
+  #run_one "$dim" large_scale      3.0
   run_one "$dim" data_assimilation "$da_b"
 }
 

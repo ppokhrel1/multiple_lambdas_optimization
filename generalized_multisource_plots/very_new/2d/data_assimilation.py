@@ -294,12 +294,13 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
     opt_model = optim.Adam([
         {'params': model_params,  'lr': ETA_THETA},
         {'params': router_params, 'lr': ETA_LAMBDA},
-    ])
+    ], weight_decay=1e-7)  # curb weight growth that inflates spectral derivatives
     sched_model = optim.lr_scheduler.StepLR(opt_model, step_size=150, gamma=0.5)  # diminishing-step schedule
     #opt_router = optim.Adam(router_params, lr=1e-5)
     opt_dual = optim.Adam(dual_params, lr=1e-2, maximize=True) if dual_params else None
+    GRAD_CLIP = 1.0  # cap update norm so high-freq content can't run away in the physics residual
 
-    loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3).to(device)
+    loss_fn = PINNLoss2D(mse_weight=10.0, physics_weight=1e-3, dealias=True).to(device)
 
     history = {
         'train_mse': [], 'val_mse': [], 'test_mse': [],
@@ -324,6 +325,7 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
             pred_r = combiner(bx)
             loss_m, weights_r, cost_r = combiner.training_step(bx, combiner(bx), by, loss_fn, budget)
             loss_m.backward()
+            torch.nn.utils.clip_grad_norm_(model_params + router_params, GRAD_CLIP)
             opt_model.step()
 
             # STEP 2: Optimize Router (Freeze Model)
@@ -340,6 +342,7 @@ def train_combiner(combiner, train_loader, val_loader, test_loader, budget, devi
                 opt_dual.zero_grad()
                 loss_d, _, _ = combiner.training_step(bx, combiner(bx), by, loss_fn, budget)
                 loss_d.backward()
+                torch.nn.utils.clip_grad_norm_(dual_params, GRAD_CLIP)
                 opt_dual.step()
 
             with torch.no_grad():
@@ -503,5 +506,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

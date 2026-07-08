@@ -909,12 +909,13 @@ class ImpAugLagrangianCombiner(AugLagrangianCombiner):
 
 
 class PINNLoss2D(nn.Module):
-    def __init__(self, mse_weight=10.0, physics_weight=1.0, nu=1e-3, dt=None):
+    def __init__(self, mse_weight=10.0, physics_weight=1.0, nu=1e-3, dt=None, dealias=False):
         super().__init__()
         self.mse_weight = mse_weight
         self.physics_weight = physics_weight
         self.nu = nu
         self.dt = dt  # Time step size (needed for time derivative approximation)
+        self.dealias = dealias  # 2/3-rule spectral cutoff on the physics residual (opt-in; default off)
 
     def get_velocity_and_grads(self, w):
         """
@@ -936,7 +937,14 @@ class PINNLoss2D(nn.Module):
         
         # FFT
         w_hat = torch.fft.fftn(w, dim=(-2, -1))
-        
+
+        if self.dealias:
+            # 2/3-rule spectral cutoff: zero the unresolved high wavenumbers so the
+            # k^2 Laplacian term cannot amplify high-frequency noise in the prediction
+            # (this blow-up is what drives the val/test physics loss to diverge).
+            mask = (kx.abs() <= nx / 3.0) & (ky.abs() <= ny / 3.0)
+            w_hat = w_hat * mask.to(w_hat.dtype)
+
         # 1. Solve Streamfunction: lap(psi) = -w  => psi_hat = w_hat / k_sq
         psi_hat = w_hat / k_sq
         
@@ -1329,4 +1337,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
